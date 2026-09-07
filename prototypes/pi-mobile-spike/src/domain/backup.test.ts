@@ -27,6 +27,18 @@ test('parses the current versioned CalDone backup format', () => {
   assert.equal(backup.meals[0]?.analysis?.title, 'Soup');
 });
 
+test('backup round trips addition clarification boundaries and rejects invalid item counts', () => {
+  const dishAddition = { originalItemCount: 0, photoIds: ['dish-photo'], note: 'Extra soup' };
+  const data = {
+    format: BACKUP_FORMAT, schemaVersion: BACKUP_SCHEMA_VERSION, exportedAt: '2026-09-04T10:00:00.000Z',
+    preferences: {}, conversations: [],
+    meals: [{ ...meal, analysis: { ...meal.analysis, dishAddition, clarification: { questions: ['How much?'], impactCalories: 150 } } }],
+  };
+  assert.deepEqual(parseCalDoneBackup(data).meals[0].analysis?.dishAddition, dishAddition);
+  dishAddition.originalItemCount = 2;
+  assert.throws(() => parseCalDoneBackup(data), /Invalid dish addition item boundary/);
+});
+
 test('summarizes restorable meal and chat photos before import', () => {
   const backup = parseCalDoneBackup({
     format: BACKUP_FORMAT,

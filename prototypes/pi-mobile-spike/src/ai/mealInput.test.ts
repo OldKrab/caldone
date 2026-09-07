@@ -21,3 +21,18 @@ test('photo meals keep both their images and optional description', () => {
   assert.match((content[0] as any).text, /Half the plate/);
   assert.deepEqual(content[1], { type: 'image', data: 'image-bytes', mimeType: 'image/jpeg' });
 });
+
+test('dish additions send the existing meal as context and only new photo evidence', () => {
+  const content = mealInputContent({
+    photos: [{ base64: 'new-dish', mimeType: 'image/jpeg' }],
+    note: 'Another serving of soup',
+    existingMeal: { title: 'Lunch', mealType: 'lunch', items: [{ name: 'Soup', calories: 200 }], totals: { calories: 200 } },
+  });
+  const prompt = (content[0] as { text: string }).text;
+  assert.match(prompt, /ONLY the newly added food/);
+  assert.match(prompt, /Do not recalculate or repeat existing items/);
+  assert.match(prompt, /extra serving does count/);
+  assert.match(prompt, /"title":"Lunch"/);
+  assert.match(prompt, /Another serving of soup/);
+  assert.deepEqual(content[1], { type: 'image', data: 'new-dish', mimeType: 'image/jpeg' });
+});

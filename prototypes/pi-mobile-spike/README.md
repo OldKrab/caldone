@@ -14,6 +14,10 @@ The Android home-screen widget opens directly into the camera. User-initiated me
 
 Opening a meal exposes its nutrition breakdown, **Fix with AI**, and manual editing for items, portions, meal type, time, calories, and macros. The Today header navigates previous days, and Settings stores optional calorie and macro goals.
 
+After analysis and clarification finish, **Add dish** opens the same camera, gallery, and text flow for an existing meal. Only the new food is analyzed, with the original meal as context; its items and photos are appended while the original items, title, type, and time are preserved. Questions about an added dish remain scoped to that dish, including after restart or backup restore.
+
+Dish additions stay on the capture/description screen until analysis and saving finish. **Stop** or Android Back during analysis keeps the draft available; request failures and concurrent meal changes also retain it for retry. Unlike initial meal logging, an unfinished addition is not a durable background job: leaving the app process or force-stopping it before the save can lose that draft.
+
 Captured photos stay in private app storage and never enter the system gallery automatically. They remain attached to the meal so the user and assistant can inspect them later; saving or sharing a photo requires an explicit user action.
 
 The interface and formatting are localized in English and Russian. Provider authorization and multimodal transport remain isolated under `src/ai`; meal prompts, persistence, and processing live outside that boundary.

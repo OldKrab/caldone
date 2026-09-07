@@ -245,7 +245,18 @@ function parseAnalysis(value: unknown): MealAnalysis {
       impactCalories: nonNegativeNumber(detail.impactCalories, 'meal.analysis.clarification.impactCalories'),
     };
   }
-  return { title: text(source.title, 'meal.analysis.title', 10_000), mealType: mealType as MealAnalysis['mealType'], items, totals, clarification };
+  let dishAddition: MealAnalysis['dishAddition'];
+  if (source.dishAddition !== undefined && source.dishAddition !== null) {
+    const scope = record(source.dishAddition, 'meal.analysis.dishAddition');
+    const originalItemCount = nonNegativeNumber(scope.originalItemCount, 'dishAddition.originalItemCount');
+    if (!Number.isInteger(originalItemCount) || originalItemCount > items.length) throw new Error('Invalid dish addition item boundary');
+    dishAddition = {
+      originalItemCount,
+      photoIds: array(scope.photoIds, 'dishAddition.photoIds', 100).map(id => text(id, 'dishAddition.photoId', 160)),
+      note: text(scope.note, 'dishAddition.note', 100_000),
+    };
+  }
+  return { title: text(source.title, 'meal.analysis.title', 10_000), mealType: mealType as MealAnalysis['mealType'], items, totals, clarification, ...(dishAddition ? { dishAddition } : {}) };
 }
 
 function parseNutrition(value: unknown, name: string) {

@@ -1,5 +1,6 @@
 import { MealProgress } from '../../components/MealProgress';
 import { QuestionAnswers } from '../../components/QuestionAnswers';
+import { canAddDish } from '../../domain/mealAddition';
 import { mealQuestionChoices } from '../../domain/mealQuestions';
 import { Ionicons } from '@expo/vector-icons';
 import * as MediaLibrary from 'expo-media-library/legacy';
@@ -42,6 +43,7 @@ export function MealDetailScreen(props: {
   initialEditing?: boolean;
   creating?: boolean;
   onBack: () => void;
+  onAddDish: () => void;
   onAnswer: (answer: string) => Promise<void>;
   onDelete: () => void;
   onAskAssistant: () => void;
@@ -170,6 +172,10 @@ export function MealDetailScreen(props: {
 
         {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
 
+        {!editing && !props.creating && <View style={{ marginTop: space.lg, gap: space.sm }}>
+          <PrimaryButton icon="add" label={t('addDish')} disabled={!canAddDish(props.meal) || props.answerSubmitting || answering} onPress={props.onAddDish} />
+          {!canAddDish(props.meal) && <Text style={styles.pendingHelp}>{t('addDishNotReady')}</Text>}
+        </View>}
         {!editing && <Pressable accessibilityRole="button" onPress={props.onAskAssistant} style={styles.assistantAction}>
           <Ionicons name="chatbubble-outline" size={19} color={color.action} />
           <Text style={styles.assistantActionText}>{t(draft.clarification ? 'discussInAssistant' : 'askAssistant')}</Text>

@@ -18,6 +18,8 @@ import type { MealPhoto } from '../../domain/meal';
 import { formatPhotoCount, locale, t } from '../../i18n';
 
 export function CaptureReviewScreen(props: {
+  addingDish?: boolean;
+  onStop?: () => void;
   photos: MealPhoto[];
   note: string;
   sending: boolean;
@@ -56,8 +58,8 @@ export function CaptureReviewScreen(props: {
           { opacity: reveal, transform: [{ translateY: reveal.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] },
         ]}>
           <View style={styles.header}>
-            <IconButton icon="close" inverted label={t('close')} onPress={props.onCancel} />
-            <Text adjustsFontSizeToFit minimumFontScale={0.86} numberOfLines={1} style={styles.headerTitle}>{locale === 'ru' ? 'Всё видно?' : 'All in the frame?'}</Text>
+            <IconButton icon="close" inverted label={t('close')} disabled={props.sending} onPress={props.onCancel} />
+            <Text adjustsFontSizeToFit minimumFontScale={0.86} numberOfLines={1} style={styles.headerTitle}>{props.addingDish ? t('addDish') : locale === 'ru' ? 'Всё видно?' : 'All in the frame?'}</Text>
             <View style={styles.headerSpacer} />
           </View>
 
@@ -66,6 +68,7 @@ export function CaptureReviewScreen(props: {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={t('removePhoto')}
+              disabled={props.sending}
               onPress={() => props.onRemovePhoto(selected)}
               style={({ pressed }) => [styles.previewRemove, pressed && styles.pressed]}
             >
@@ -97,6 +100,7 @@ export function CaptureReviewScreen(props: {
               <Text style={styles.composerCount}>{formatPhotoCount(props.photos.length)}</Text>
             </View>
             <TextInput
+              editable={!props.sending}
               maxLength={300}
               onChangeText={props.onNoteChange}
               placeholder={t('notePlaceholder')}
@@ -105,16 +109,19 @@ export function CaptureReviewScreen(props: {
               value={props.note}
             />
             {props.error && <Text style={styles.error}>{props.error}</Text>}
+            {props.addingDish && <Text accessibilityLiveRegion="polite" style={styles.additionHelp}>{t(props.sending ? 'addingDish' : 'addDishHelp')}</Text>}
+            {props.addingDish && props.sending && <Pressable accessibilityRole="button" onPress={props.onStop} style={styles.addAngle}><Text style={styles.addAngleText}>{t('stop')}</Text></Pressable>}
             <PrimaryButton
               busy={props.sending}
               disabled={props.photos.length === 0}
               icon="checkmark"
-              label={locale === 'ru' ? 'Добавить и распознать' : 'Log this meal'}
+              label={props.addingDish ? t('addDish') : locale === 'ru' ? 'Добавить и распознать' : 'Log this meal'}
               onPress={props.onSend}
             />
             <Pressable
               accessibilityRole="button"
               onPress={props.onAddPhoto}
+              disabled={props.sending}
               style={({ pressed }) => [styles.addAngle, pressed && styles.pressed]}
             >
               <Ionicons name="camera-outline" size={20} color={color.cameraText} />
@@ -127,6 +134,7 @@ export function CaptureReviewScreen(props: {
 }
 
 const styles = StyleSheet.create({
+  additionHelp: { color: color.cameraMuted, fontSize: 14, lineHeight: 20 },
   safeArea: { backgroundColor: color.camera, flex: 1 },
   screen: { flex: 1 },
   header: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: space.md, paddingVertical: space.sm },

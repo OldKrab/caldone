@@ -2,6 +2,7 @@ import { submitMealAnswer } from './mealAnswerSubmission';
 import type { MealRequestContext } from '../ai/mealRequestContext';
 import { beginForegroundWork } from './foregroundWork';
 import { hasMealInput } from '../ai/mealInput';
+import { dishClarificationInput, mergeDishClarification } from '../domain/mealAddition';
 import { File } from 'expo-file-system';
 import * as Notifications from 'expo-notifications';
 import { AppState, Platform } from 'react-native';
@@ -183,6 +184,7 @@ export async function answerMealClarification(id: string, answer: string, answer
     if (!meal?.analysis || !clarification) return;
 
     const questions = mealQuestions(clarification);
+    const evidence = dishClarificationInput(meal);
     const thread = await ensureClarificationThread(id, meal.analysis.title);
     await syncMealQuestionsToThread(thread.id, id, questions, meal.capturedAt);
     if (!answeredInThreadId) await appendInlineMealAnswer(thread.id, answer);
@@ -194,7 +196,7 @@ export async function answerMealClarification(id: string, answer: string, answer
       setMealActivity(id, 'reviewing_meal');
       // Clarification is a fresh provider request: the prior analysis does not
       // carry image bytes forward. Reload the saved meal's visual evidence.
-      const photos = await Promise.all(meal.photos.map(async (photo) => ({
+      const photos = await Promise.all(evidence.photos.map(async (photo) => ({
         base64: await new File(photo.uri).base64(),
         mimeType: photo.mimeType,
       })));
@@ -202,8 +204,8 @@ export async function answerMealClarification(id: string, answer: string, answer
         mealId: id,
         signal,
         photos,
-        note: meal.note,
-        previousJson: JSON.stringify(meal.analysis),
+        note: evidence.note,
+        previousJson: JSON.stringify(evidence.analysis),
         question: questions.join('\n'),
         answer,
         assistantInterpretation: context?.assistantInterpretation,
@@ -211,7 +213,7 @@ export async function answerMealClarification(id: string, answer: string, answer
         language: locale === 'ru' ? 'Russian' : 'English',
         onActivity: (activity) => setMealActivity(id, activity),
       });
-      const analysis = { ...parseMealAnalysis(result.text), research: result.research };
+      const analysis = mergeDishClarification(meal.analysis, { ...parseMealAnalysis(result.text), research: result.research });
       setMealActivity(id, 'saving_result');
       await saveMealAnalysis(id, analysis);
       const remainingQuestions = mealQuestions(analysis.clarification);

@@ -17,6 +17,13 @@ test('analysis prompt has a stable diagnostic version', () => {
   assert.match(MEAL_ANALYSIS_PROMPT_VERSION, /^meal-evidence-v\d+$/);
 });
 
+test('addition system instructions limit calculation and questions to new food', () => {
+  const prompt = buildMealAnalysisPrompt('English', true);
+  assert.match(prompt, /ONLY newly added food/);
+  assert.match(prompt, /Ask questions only about the addition/);
+  assert.doesNotMatch(prompt, /Recognize the whole meal/);
+});
+
 
 test('descriptions are sufficient evidence and missing portions do not require a photo', () => {
   const prompt = buildMealAnalysisPrompt('English');
