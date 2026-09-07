@@ -187,17 +187,17 @@ export function ProviderSetupScreen(props: {
         {props.onboarding && <View style={styles.progress}>{[0, 1, 2, 3, 4].map((index) => <View key={index} style={[styles.progressBar, styles.progressBarActive]} />)}</View>}
         <View style={styles.header}>
           {props.onBack ? <IconButton icon="arrow-back" label={t('back')} onPress={props.onBack} /> : <View style={styles.headerSpacer} />}
-          <Text adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={1} style={styles.headerTitle}>{t(props.onboarding ? 'setupProviderTitle' : 'aiProvider')}</Text>
+          <Text selectable adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={1} style={styles.headerTitle}>{t(props.onboarding ? 'setupProviderTitle' : 'aiProvider')}</Text>
           <View style={styles.headerSpacer} />
         </View>
 
         <ScrollView contentContainerStyle={styles.content} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.scroll}>
-          {props.onboarding && <Text style={styles.stepLabel}>{t('setupStep', { current: 5, total: 5 })}</Text>}
-          <Text style={styles.intro}>{t(props.onboarding ? 'setupProviderBody' : 'providerHelp')}</Text>
+          {props.onboarding && <Text selectable style={styles.stepLabel}>{t('setupStep', { current: 5, total: 5 })}</Text>}
+          <Text selectable style={styles.intro}>{t(props.onboarding ? 'setupProviderBody' : 'providerHelp')}</Text>
 
           {connectedProviders.length > 0 && (
             <>
-              <Text style={styles.sectionLabel}>{t('connectedProviders')}</Text>
+              <Text selectable style={styles.sectionLabel}>{t('connectedProviders')}</Text>
               <View style={styles.providerList}>
                 {connectedProviders.map((provider) => (
                   <ProviderRow
@@ -241,8 +241,8 @@ export function ProviderSetupScreen(props: {
                   {selectedModelSupportsSearch && (
                     <View style={styles.configurationRow}>
                       <View style={styles.configurationCopy}>
-                        <Text style={styles.configurationLabel}>{t('webSearch')}</Text>
-                        <Text style={styles.configurationValue}>{t('webSearchHelp')}</Text>
+                        <Text selectable style={styles.configurationLabel}>{t('webSearch')}</Text>
+                        <Text selectable style={styles.configurationValue}>{t('webSearchHelp')}</Text>
                       </View>
                       <Switch
                         accessibilityLabel={t('webSearch')}
@@ -264,7 +264,7 @@ export function ProviderSetupScreen(props: {
 
           {catalogOpen && (
             <View style={styles.catalog}>
-              <Text style={styles.catalogTitle}>{t('addProvider')}</Text>
+              <Text selectable style={styles.catalogTitle}>{t('addProvider')}</Text>
               <View style={styles.searchWrap}>
                 <Ionicons name="search" size={18} color={color.muted} />
                 <TextInput onChangeText={setQuery} placeholder={t('searchProviders')} placeholderTextColor={color.muted} style={styles.search} value={query} />
@@ -288,8 +288,8 @@ export function ProviderSetupScreen(props: {
                             </Pressable>
                           ))}
                           {connecting && <ActivityIndicator color={color.action} />}
-                          {status ? <Text style={styles.status}>{status}</Text> : null}
-                          {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+                          {status ? <Text selectable style={styles.status}>{status}</Text> : null}
+                          {error ? <Text selectable accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
                         </View>
                       )}
                     </View>
@@ -321,7 +321,7 @@ function ThinkingPicker(props: { levels: ThinkingLevel[]; selected?: ThinkingLev
     <Modal animationType="fade" onRequestClose={props.onClose} transparent visible={props.visible}>
       <SafeAreaView style={styles.modalBackdrop}>
         <View style={styles.modelPicker}>
-          <View style={styles.modelPickerHeader}><Text style={styles.promptTitle}>{t('chooseThinkingLevel')}</Text><IconButton icon="close" label={t('close')} onPress={props.onClose} /></View>
+          <View style={styles.modelPickerHeader}><Text selectable style={styles.promptTitle}>{t('chooseThinkingLevel')}</Text><IconButton icon="close" label={t('close')} onPress={props.onClose} /></View>
           <ScrollView contentContainerStyle={styles.modelList} keyboardShouldPersistTaps="handled">
             <ModelRow label={t('thinkingAutomatic')} selected={!props.selected} onPress={() => void props.onSelect()} />
             {props.levels.map((level) => <ModelRow key={level} label={thinkingLabel(level)} selected={props.selected === level} onPress={() => void props.onSelect(level)} />)}
@@ -349,11 +349,11 @@ function ModelPicker(props: { provider?: ProviderOption; selectedModelId?: strin
     <Modal animationType="fade" onRequestClose={props.onClose} transparent visible={props.visible}>
       <SafeAreaView style={styles.modalBackdrop}>
         <View style={styles.modelPicker}>
-          <View style={styles.modelPickerHeader}><Text style={styles.promptTitle}>{t('chooseModel')}</Text><IconButton icon="close" label={t('close')} onPress={props.onClose} /></View>
+          <View style={styles.modelPickerHeader}><Text selectable style={styles.promptTitle}>{t('chooseModel')}</Text><IconButton icon="close" label={t('close')} onPress={props.onClose} /></View>
           <ScrollView contentContainerStyle={styles.modelList} keyboardShouldPersistTaps="handled">
             <TextInput accessibilityLabel={locale === 'ru' ? 'Поиск модели' : 'Search models'} value={search} onChangeText={setSearch} placeholder={locale === 'ru' ? 'Найти модель…' : 'Find a model…'} placeholderTextColor={color.muted} style={styles.modelSearch} />
             <ModelRow label={t('automatic')} selected={!props.selectedModelId} onPress={() => void props.onSelect()} />
-            {matchingModels.length === 0 && <Text style={styles.modelOptionDetail}>{locale === 'ru' ? 'Подходящих моделей нет' : 'No matching models'}</Text>}
+            {matchingModels.length === 0 && <Text selectable style={styles.modelOptionDetail}>{locale === 'ru' ? 'Подходящих моделей нет' : 'No matching models'}</Text>}
             {matchingModels.map((model) => <ModelRow key={model.id} detail={model.id} label={model.name} selected={props.selectedModelId === model.id} onPress={() => void props.onSelect(model.id)} />)}
           </ScrollView>
         </View>
@@ -385,7 +385,7 @@ function ProviderPromptModal(props: { pending?: PendingPrompt; onCancel: () => v
       <SafeAreaView style={styles.modalBackdrop}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' || Platform.OS === 'android' ? 'padding' : undefined} style={styles.promptKeyboard}>
           <View style={styles.prompt}>
-          <Text style={styles.promptTitle}>{pending?.prompt.message}</Text>
+          <Text selectable style={styles.promptTitle}>{pending?.prompt.message}</Text>
           {pending?.prompt.type === 'select' ? (
             <View style={styles.promptOptions}>{pending.prompt.options.map((option) => <Pressable key={option.id} onPress={() => submit(option.id)} style={styles.promptOption}><Text style={styles.promptOptionTitle}>{option.label}</Text>{option.description ? <Text style={styles.promptOptionBody}>{option.description}</Text> : null}</Pressable>)}</View>
           ) : (

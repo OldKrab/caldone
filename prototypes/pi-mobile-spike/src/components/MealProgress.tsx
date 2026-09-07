@@ -32,14 +32,14 @@ export function MealProgress(props: { mealId?: string; stage?: MealActivityStage
   return <View style={styles.container}>
     <View style={styles.heading}>
       <ActivityIndicator color={color.action} size="small" />
-      <Text accessibilityLiveRegion="polite" style={styles.title}>{props.label ?? mealActivityLabel(stage)}</Text>
-      <Text accessibilityLabel={`${ru ? 'Прошло' : 'Elapsed'} ${elapsed}`} style={styles.elapsed}>{elapsed}</Text>
+      <Text selectable accessibilityLiveRegion="polite" style={styles.title}>{props.label ?? mealActivityLabel(stage)}</Text>
+      <Text selectable accessibilityLabel={`${ru ? 'Прошло' : 'Elapsed'} ${elapsed}`} style={styles.elapsed}>{elapsed}</Text>
     </View>
-    {!props.compact && props.mealId && <Text style={styles.help}>{props.previousEstimate
+    {!props.compact && props.mealId && <Text selectable style={styles.help}>{props.previousEstimate
       ? ru ? 'Пересчёт ещё не завершён. Ниже — предыдущая оценка.' : 'Update in progress. The previous estimate is shown below.'
       : ru ? 'Оценка ещё не готова. Можно продолжать пользоваться приложением.' : 'The estimate is not ready yet. You can continue using the app.'}</Text>}
-    {!props.compact && previous.length > 0 && <Text style={styles.help}>{ru ? 'Предыдущие этапы: ' : 'Previous stages: '}{previous.map(mealActivityLabel).join(' → ')}</Text>}
-    {!props.compact && seconds >= 45 && <Text style={styles.help}>{ru ? 'Обработка занимает больше времени. Ожидаем результат.' : 'Processing is taking longer. Waiting for the result.'}</Text>}
+    {!props.compact && previous.length > 0 && <Text selectable style={styles.help}>{ru ? 'Предыдущие этапы: ' : 'Previous stages: '}{previous.map(mealActivityLabel).join(' → ')}</Text>}
+    {!props.compact && seconds >= 45 && <Text selectable style={styles.help}>{ru ? 'Обработка занимает больше времени. Ожидаем результат.' : 'Processing is taking longer. Waiting for the result.'}</Text>}
   </View>;
 }
 

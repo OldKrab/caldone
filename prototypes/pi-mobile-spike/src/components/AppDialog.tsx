@@ -35,8 +35,8 @@ export function AppDialogProvider(props: { children: ReactNode }) {
             {dialog && (
               <View style={styles.sheet}>
                 <View style={styles.heading}>
-                  <Text accessibilityRole="header" style={styles.title}>{dialog.title}</Text>
-                  {dialog.message ? <Text style={styles.message}>{dialog.message}</Text> : null}
+                  <Text selectable accessibilityRole="header" style={styles.title}>{dialog.title}</Text>
+                  {dialog.message ? <Text selectable style={styles.message}>{dialog.message}</Text> : null}
                 </View>
                 <View style={styles.actions}>
                   {dialog.actions.map((action, index) => (

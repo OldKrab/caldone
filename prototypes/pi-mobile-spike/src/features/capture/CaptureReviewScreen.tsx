@@ -59,7 +59,7 @@ export function CaptureReviewScreen(props: {
         ]}>
           <View style={styles.header}>
             <IconButton icon="close" inverted label={t('close')} disabled={props.sending} onPress={props.onCancel} />
-            <Text adjustsFontSizeToFit minimumFontScale={0.86} numberOfLines={1} style={styles.headerTitle}>{props.addingDish ? t('addDish') : locale === 'ru' ? 'Всё видно?' : 'All in the frame?'}</Text>
+            <Text selectable adjustsFontSizeToFit minimumFontScale={0.86} numberOfLines={1} style={styles.headerTitle}>{props.addingDish ? t('addDish') : locale === 'ru' ? 'Всё видно?' : 'All in the frame?'}</Text>
             <View style={styles.headerSpacer} />
           </View>
 
@@ -96,8 +96,8 @@ export function CaptureReviewScreen(props: {
 
           <View style={styles.composer}>
             <View style={styles.composerHeading}>
-              <Text style={styles.composerLabel}>{locale === 'ru' ? 'Есть что уточнить?' : 'Anything to add?'}</Text>
-              <Text style={styles.composerCount}>{formatPhotoCount(props.photos.length)}</Text>
+              <Text selectable style={styles.composerLabel}>{locale === 'ru' ? 'Есть что уточнить?' : 'Anything to add?'}</Text>
+              <Text selectable style={styles.composerCount}>{formatPhotoCount(props.photos.length)}</Text>
             </View>
             <TextInput
               editable={!props.sending}
@@ -108,8 +108,8 @@ export function CaptureReviewScreen(props: {
               style={styles.input}
               value={props.note}
             />
-            {props.error && <Text style={styles.error}>{props.error}</Text>}
-            {props.addingDish && <Text accessibilityLiveRegion="polite" style={styles.additionHelp}>{t(props.sending ? 'addingDish' : 'addDishHelp')}</Text>}
+            {props.error && <Text selectable style={styles.error}>{props.error}</Text>}
+            {props.addingDish && <Text selectable accessibilityLiveRegion="polite" style={styles.additionHelp}>{t(props.sending ? 'addingDish' : 'addDishHelp')}</Text>}
             {props.addingDish && props.sending && <Pressable accessibilityRole="button" onPress={props.onStop} style={styles.addAngle}><Text style={styles.addAngleText}>{t('stop')}</Text></Pressable>}
             <PrimaryButton
               busy={props.sending}

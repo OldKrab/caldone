@@ -48,8 +48,8 @@ export function HomeScreen(props: {
         <View style={[styles.screen, { paddingBottom: props.bottomInset ?? 0 }]}>
           <View style={styles.header}>
             <View style={styles.heading}>
-              <Text style={styles.title}>{formatDay(props.day)}</Text>
-              <Text style={styles.date}>{date}</Text>
+              <Text selectable style={styles.title}>{formatDay(props.day)}</Text>
+              <Text selectable style={styles.date}>{date}</Text>
             </View>
             <IconButton
               icon="chevron-back"
@@ -67,19 +67,19 @@ export function HomeScreen(props: {
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.budget}>
               <View style={styles.budgetTop}>
-                <Text style={styles.budgetTitle}>{ru ? 'Ваш день' : 'Your day'}</Text>
-                <Text style={styles.budgetCaption}>
+                <Text selectable style={styles.budgetTitle}>{ru ? 'Ваш день' : 'Your day'}</Text>
+                <Text selectable style={styles.budgetCaption}>
                   {props.goals.calories
                     ? `${formatNumber(displayEnergy(props.goals.calories, props.units))} ${unit} · ${t('goal')}`
                     : t('noGoal')}
                 </Text>
               </View>
               <View style={styles.energyLine}>
-                <Text style={styles.energy}>
+                <Text selectable style={styles.energy}>
                   {formatNumber(displayEnergy(totals.calories, props.units))}
                   <Text style={styles.energyUnit}> {unit}</Text>
                 </Text>
-                <Text style={styles.remaining}>
+                <Text selectable style={styles.remaining}>
                   {props.goals.calories && totals.calories <= props.goals.calories
                     ? `${formatNumber(displayEnergy(props.goals.calories - totals.calories, props.units))} ${ru ? 'осталось' : 'remaining'}`
                     : ru
@@ -104,8 +104,8 @@ export function HomeScreen(props: {
               <View style={styles.macros}>
                 {(['protein', 'carbs', 'fat'] as const).map((key) => (
                   <View key={key} style={styles.macro}>
-                    <Text style={styles.macroLabel}>{t(key)}</Text>
-                    <Text style={styles.macroValue}>
+                    <Text selectable style={styles.macroLabel}>{t(key)}</Text>
+                    <Text selectable style={styles.macroValue}>
                       {formatNumber(displayWeight(totals[key], props.units))}
                       <Text style={styles.macroGoal}>
                         {props.goals[key]
@@ -174,18 +174,18 @@ export function HomeScreen(props: {
               </View>
             )}
             <View style={styles.sectionHeading}>
-              <Text style={styles.sectionTitle}>{ru ? 'Приёмы пищи' : 'Meals'}</Text>
-              <Text style={styles.count}>{meals.length > 0 ? meals.length : ''}</Text>
+              <Text selectable style={styles.sectionTitle}>{ru ? 'Приёмы пищи' : 'Meals'}</Text>
+              <Text selectable style={styles.count}>{meals.length > 0 ? meals.length : ''}</Text>
             </View>
             {meals.length === 0 ? (
               <View style={styles.empty}>
                 <View style={styles.emptyIcon}>
                   <Ionicons name="restaurant-outline" size={24} color={color.action} />
                 </View>
-                <Text style={styles.emptyTitle}>
+                <Text selectable style={styles.emptyTitle}>
                   {t(props.canGoNext ? 'emptyPastTitle' : 'emptyTitle')}
                 </Text>
-                <Text style={styles.emptyBody}>
+                <Text selectable style={styles.emptyBody}>
                   {ru
                     ? 'Добавьте еду удобным способом. Детали можно уточнить позже.'
                     : 'Add a meal your way. You can refine the details later.'}

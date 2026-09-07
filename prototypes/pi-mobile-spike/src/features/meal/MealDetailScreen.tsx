@@ -111,8 +111,8 @@ export function MealDetailScreen(props: {
         <Header title={t('mealDetails')} onBack={props.onBack} actionLabel={props.meal.status === 'failed' ? t('delete') : undefined} onAction={confirmDelete} />
         <View style={styles.loading}>
           {props.meal.photos[0] && <Image source={{ uri: props.meal.photos[0].uri }} style={styles.pendingPhoto} />}
-          {props.meal.status === 'failed' ? <Text style={styles.loadingText}>{t('failed')}</Text> : <MealProgress mealId={props.meal.id} stage={props.activity} />}
-          <Text style={styles.pendingHelp}>{props.meal.status === 'failed' ? (locale === 'ru' ? 'Не удалось получить оценку. Вернитесь к дневнику, чтобы повторить анализ, или удалите запись.' : 'The estimate could not be completed. Return to your journal to retry, or delete this record.') : (locale === 'ru' ? 'Можно вернуться к дневнику. Результат появится в записи.' : 'You can return to your journal. The result will appear in this record.')}</Text>
+          {props.meal.status === 'failed' ? <Text selectable style={styles.loadingText}>{t('failed')}</Text> : <MealProgress mealId={props.meal.id} stage={props.activity} />}
+          <Text selectable style={styles.pendingHelp}>{props.meal.status === 'failed' ? (locale === 'ru' ? 'Не удалось получить оценку. Вернитесь к дневнику, чтобы повторить анализ, или удалите запись.' : 'The estimate could not be completed. Return to your journal to retry, or delete this record.') : (locale === 'ru' ? 'Можно вернуться к дневнику. Результат появится в записи.' : 'You can return to your journal. The result will appear in this record.')}</Text>
           <PrimaryButton label={locale === 'ru' ? 'К дневнику' : 'Back to journal'} onPress={props.onBack} />
         </View>
       </SafeAreaView>
@@ -137,21 +137,21 @@ export function MealDetailScreen(props: {
         >
 
         {!editing && <View style={styles.mealHeading}>
-          <Text style={styles.title}>{draft.title}</Text>
-          <Text style={styles.mealType}>{t(draft.mealType)} · {formatTime(props.meal.capturedAt)}</Text>
+          <Text selectable style={styles.title}>{draft.title}</Text>
+          <Text selectable style={styles.mealType}>{t(draft.mealType)} · {formatTime(props.meal.capturedAt)}</Text>
           {props.meal.note.trim() && <View style={styles.noteBlock}>
-            <Text style={styles.noteLabel}>{t('yourNote')}</Text>
-            <Text style={styles.noteText}>{props.meal.note.trim()}</Text>
+            <Text selectable style={styles.noteLabel}>{t('yourNote')}</Text>
+            <Text selectable style={styles.noteText}>{props.meal.note.trim()}</Text>
           </View>}
         </View>}
 
         {!editing && working && <MealProgress mealId={props.meal.id} stage={props.activity} compact label={t('analyzing')} />}
-        {!editing && !working && props.meal.status === 'needs_input' && <Text style={styles.clarificationActivity}>{locale === 'ru' ? 'Предварительная оценка · ожидает уточнения' : 'Provisional estimate · awaiting clarification'}</Text>}
-        {!editing && !working && props.meal.status === 'failed' && <Text style={styles.error}>{locale === 'ru' ? 'Пересчёт не завершён. Ниже — предыдущая оценка.' : 'Update failed. The previous estimate is shown below.'}</Text>}
+        {!editing && !working && props.meal.status === 'needs_input' && <Text selectable style={styles.clarificationActivity}>{locale === 'ru' ? 'Предварительная оценка · ожидает уточнения' : 'Provisional estimate · awaiting clarification'}</Text>}
+        {!editing && !working && props.meal.status === 'failed' && <Text selectable style={styles.error}>{locale === 'ru' ? 'Пересчёт не завершён. Ниже — предыдущая оценка.' : 'Update failed. The previous estimate is shown below.'}</Text>}
         {!editing && mealQuestions(draft.clarification).length > 0 && (
           // Keep answer draft mounted so a failed request restores the typed answer.
           <View style={[styles.clarification, working && { display: 'none' }]}>
-            <Text style={styles.clarificationLabel}>{t('clarificationTitle')}</Text>
+            <Text selectable style={styles.clarificationLabel}>{t('clarificationTitle')}</Text>
             <QuestionAnswers key={`${props.meal.id}-${JSON.stringify(draft.clarification)}`}
               questions={mealQuestionChoices(draft.clarification)} disabled={answering || props.answerSubmitting}
               onSubmit={submitClarification} />
@@ -180,7 +180,7 @@ export function MealDetailScreen(props: {
           <MealOverview meal={props.meal} analysis={draft} units={props.units} hideNutrition={Boolean(working)} />
         )}
 
-        {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+        {error ? <Text selectable accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
 
         {!editing && !props.creating && !working && canAddDish(props.meal) && <View style={styles.mealActions}>
           <PrimaryButton icon="add" label={t('addDish')} onPress={props.onAddDish} />
@@ -209,7 +209,7 @@ function Header(props: {
   return (
     <View style={styles.header}>
       <View style={styles.headerSide}><IconButton icon="arrow-back" label={t('back')} onPress={props.onBack} /></View>
-      <Text adjustsFontSizeToFit minimumFontScale={0.86} numberOfLines={1} style={styles.headerTitle}>{props.title}</Text>
+      <Text selectable adjustsFontSizeToFit minimumFontScale={0.86} numberOfLines={1} style={styles.headerTitle}>{props.title}</Text>
       {props.actionLabel && props.onAction ? (
         <View style={[styles.headerSide, styles.headerSideEnd]}><Pressable accessibilityRole="button" hitSlop={6} onPress={props.onAction} style={styles.headerActionButton}>
           <Text numberOfLines={1} style={styles.headerAction}>{props.actionLabel}</Text>
@@ -262,13 +262,13 @@ function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: Nutrit
     <>
       <View style={styles.detailTicket}>
         {!props.hideNutrition && props.analysis.items.length > 0 && <View style={styles.totalRow}>
-          <Text style={styles.totalCalories}>{formatNumber(displayEnergy(props.analysis.totals.calories, props.units))} {energyUnit(props.units)}</Text>
-          <Text style={styles.totalMacros}>
+          <Text selectable style={styles.totalCalories}>{formatNumber(displayEnergy(props.analysis.totals.calories, props.units))} {energyUnit(props.units)}</Text>
+          <Text selectable style={styles.totalMacros}>
             {weight === null
               ? (locale === 'ru' ? 'Общая масса не определена' : 'Total weight unavailable')
               : `${locale === 'ru' ? 'Общая масса' : 'Total weight'} ≈ ${formatMacro(weight, props.units)}`}
           </Text>
-          <Text style={styles.totalMacros}>
+          <Text selectable style={styles.totalMacros}>
             {t('proteinShort')} {formatMacro(props.analysis.totals.protein, props.units)} · {t('carbsShort')} {formatMacro(props.analysis.totals.carbs, props.units)} · {t('fatShort')} {formatMacro(props.analysis.totals.fat, props.units)}
           </Text>
         </View>}
@@ -307,15 +307,15 @@ function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: Nutrit
             return (
             <View key={`${item.name}-${index}`} style={[styles.itemRow, compact && styles.itemRowCompact, index > 0 && styles.divider]}>
               <View style={styles.itemCopy}>
-                <Text style={styles.itemName}>{item.name}</Text>
-                <Text style={styles.itemQuantity}>{item.quantity}</Text>
-                <Text style={styles.itemQuantity}>
+                <Text selectable style={styles.itemName}>{item.name}</Text>
+                <Text selectable style={styles.itemQuantity}>{item.quantity}</Text>
+                <Text selectable style={styles.itemQuantity}>
                   {per100g === null ? t('per100gUnknown') : `≈ ${formatNumber(displayEnergy(per100g, props.units))} ${energyUnit(props.units)} ${t('per100g')}`}
                 </Text>
               </View>
               <View style={[styles.itemNutrition, compact && styles.itemNutritionCompact]}>
-                <Text style={styles.itemCalories}>{formatNumber(displayEnergy(item.calories, props.units))} {energyUnit(props.units)}</Text>
-                <Text style={styles.itemMacros}>
+                <Text selectable style={styles.itemCalories}>{formatNumber(displayEnergy(item.calories, props.units))} {energyUnit(props.units)}</Text>
+                <Text selectable style={styles.itemMacros}>
                   {t('proteinShort')} {formatMacro(item.protein, props.units)} · {t('carbsShort')} {formatMacro(item.carbs, props.units)} · {t('fatShort')} {formatMacro(item.fat, props.units)}
                 </Text>
               </View>
@@ -378,7 +378,7 @@ function MealEditor(props: {
 
   return (
     <>
-      <Text style={styles.fieldLabel}>{t('mealType')}</Text>
+      <Text selectable style={styles.fieldLabel}>{t('mealType')}</Text>
       <View style={styles.chips}>
         {mealTypes.map((type) => (
           <Pressable
@@ -397,7 +397,7 @@ function MealEditor(props: {
         <Field keyboard="numbers-and-punctuation" label={t('time')} value={props.time} onChange={props.onTimeChange} fixed={!compact} />
       </View>
 
-      <Text style={styles.itemsHeading}>{t('items')}</Text>
+      <Text selectable style={styles.itemsHeading}>{t('items')}</Text>
       {props.draft.items.map((item, index) => (
         <View key={index} style={styles.itemEditor}>
           <Pressable accessibilityRole="button" accessibilityState={{ expanded: expandedItem === index }} onPress={() => setExpandedItem(expandedItem === index ? undefined : index)} style={styles.ingredientHeader}>
@@ -430,7 +430,7 @@ function MealEditor(props: {
         <Ionicons name="add" size={19} color={color.action} />
         <Text style={styles.addItemText}>{t('addItem')}</Text>
       </Pressable>
-      <Text style={styles.editorTotal}>{t('total')}: {formatNumber(sumItems(props.draft.items).calories)} {t('kcal')}</Text>
+      <Text selectable style={styles.editorTotal}>{t('total')}: {formatNumber(sumItems(props.draft.items).calories)} {t('kcal')}</Text>
     </>
   );
 }
@@ -446,7 +446,7 @@ function Field(props: {
 }) {
   return (
     <View style={[styles.field, props.fixed && styles.fieldFixed, props.nutrition && styles.fieldNutrition, props.stacked && styles.fieldStacked]}>
-      <Text style={styles.fieldLabel}>{props.label}</Text>
+      <Text selectable style={styles.fieldLabel}>{props.label}</Text>
       <TextInput
         accessibilityLabel={props.label}
         keyboardType={props.keyboard ?? 'default'}
