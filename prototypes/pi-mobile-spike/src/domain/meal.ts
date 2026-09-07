@@ -16,6 +16,10 @@ export type NutritionTotals = {
 export type MealItem = NutritionTotals & { name: string; quantity: string };
 
 export type MealAnalysis = {
+  /** While an added dish has open questions, protect the original item prefix
+   * and send only the addition's evidence to clarification requests. Persisted
+   * with the analysis so answering after an app restart has the same scope. */
+  dishAddition?: { originalItemCount: number; photoIds: string[]; note: string };
   /** Provider-observed research from this calculation, not model-supplied evidence. */
   research?: import('./mealResearch').MealResearch;
   title: string;

@@ -4,13 +4,14 @@ import { submitMealAnswer, subscribeMealAnswers } from './src/services/mealAnswe
 import { foregroundWorkActive } from './src/services/foregroundWork';
 import { DescribeMealScreen } from './src/features/capture/DescribeMealScreen';
 import { hasMealInput } from './src/ai/mealInput';
+import { addDishToMeal } from './src/services/mealAddition';
 import { Ionicons } from '@expo/vector-icons';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
 import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, BackHandler, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -128,6 +129,9 @@ function CalDoneApp() {
   const [photos, setPhotos] = useState<MealPhoto[]>([]);
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
+  const sendInFlight = useRef(false);
+  const additionAbort = useRef<AbortController | undefined>(undefined);
+  const [additionMealId, setAdditionMealId] = useState<string>();
   const [savingGoals, setSavingGoals] = useState(false);
   const [captureError, setCaptureError] = useState('');
   const [chatThread, setChatThread] = useState<ChatThread>();
@@ -230,6 +234,17 @@ function CalDoneApp() {
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (screen === 'settings') return false;
+      if (['camera', 'capture_review', 'describe'].includes(screen)) {
+        if (sendInFlight.current) {
+          additionAbort.current?.abort();
+          return true;
+        }
+        if (additionMealId && screen !== 'capture_review') {
+          if (screen === 'camera' && photos.length > 0) setScreen('capture_review');
+          else discardCapture();
+          return true;
+        }
+      }
       const destination = backDestination(screen, photos.length > 0);
       if (destination === 'exit') return false;
       if (screen === 'detail' && manualMeal) {
@@ -245,7 +260,7 @@ function CalDoneApp() {
       return true;
     });
     return () => subscription.remove();
-  }, [manualMeal, photos.length, screen, sending]);
+  }, [additionMealId, manualMeal, photos, screen, sending]);
 
   useEffect(() => {
     void (async () => {
@@ -304,6 +319,7 @@ function CalDoneApp() {
   }, [refresh, screen, selectedMeal?.id, selectedMeal?.status]);
 
   const openCapture = () => {
+    setAdditionMealId(undefined);
     setCaptureError('');
     setScreen('camera');
   };
@@ -352,20 +368,27 @@ function CalDoneApp() {
   };
 
   const discardCapture = () => {
+    if (sendInFlight.current) return;
     photos.forEach(deletePhoto);
     setPhotos([]);
     setNote('');
     setCaptureError('');
-    setScreen('home');
+    setScreen(additionMealId ? 'detail' : 'home');
+    setAdditionMealId(undefined);
   };
 
   const openDescription = () => {
-    discardCapture();
+    if (sendInFlight.current) return;
+    photos.forEach(deletePhoto);
+    setPhotos([]);
+    setCaptureError('');
     setScreen('describe');
   };
 
   const sendMeal = async () => {
-    if (!hasMealInput({ photos, note }) || sending) return;
+    if (!hasMealInput({ photos, note }) || sendInFlight.current) return;
+    sendInFlight.current = true;
+    additionAbort.current = additionMealId ? new AbortController() : undefined;
     setSending(true);
     setCaptureError('');
     const storedPhotos: MealPhoto[] = [];
@@ -379,6 +402,18 @@ function CalDoneApp() {
         const destination = new File(photoDirectory, `${mealId}-${index}.jpg`);
         await source.copy(destination);
         storedPhotos.push({ ...photo, uri: destination.uri });
+      }
+      if (additionMealId) {
+        await addDishToMeal(additionMealId, { photos: storedPhotos, note: note.trim(), signal: additionAbort.current?.signal });
+        mealSaved = true;
+        photos.forEach(deletePhoto);
+        setPhotos([]);
+        setNote('');
+        setSelectedMealId(additionMealId);
+        setAdditionMealId(undefined);
+        setScreen('detail');
+        await refresh();
+        return;
       }
       const meal = await createMeal({
         id: mealId,
@@ -395,10 +430,14 @@ function CalDoneApp() {
       await refresh();
       void applyNotificationPreferences(notificationPreferences, true);
       void processMeal(meal.id).finally(refresh);
-    } catch {
+    } catch (error) {
       if (!mealSaved) storedPhotos.forEach(deletePhoto);
-      setCaptureError(t('saveError'));
+      setCaptureError(additionAbort.current?.signal.aborted ? '' : additionMealId
+        ? [t('addDishError'), error instanceof Error && [t('addDishChanged'), t('addDishNotReady')].includes(error.message) ? error.message : ''].filter(Boolean).join(' ')
+        : t('saveError'));
     } finally {
+      sendInFlight.current = false;
+      additionAbort.current = undefined;
       setSending(false);
     }
   };
@@ -773,7 +812,7 @@ function CalDoneApp() {
   if (screen === 'describe') {
     return <>
       <StatusBar style="dark" />
-      <DescribeMealScreen note={note} sending={sending} error={captureError ? t('descriptionSaveError') : undefined} onChange={setNote} onCancel={discardCapture} onManual={() => { discardCapture(); addManualMeal(); }} onSend={() => void sendMeal()} />
+      <DescribeMealScreen addingDish={Boolean(additionMealId)} note={note} sending={sending} error={additionMealId ? captureError : captureError ? t('descriptionSaveError') : undefined} onChange={setNote} onCancel={discardCapture} onStop={() => additionAbort.current?.abort()} onManual={additionMealId ? undefined : () => { discardCapture(); addManualMeal(); }} onSend={() => void sendMeal()} />
     </>;
   }
 
@@ -782,6 +821,8 @@ function CalDoneApp() {
       <>
         <StatusBar style="light" />
         <CaptureReviewScreen
+          addingDish={Boolean(additionMealId)}
+          onStop={() => additionAbort.current?.abort()}
           error={captureError}
           note={note}
           photos={photos}
@@ -900,6 +941,13 @@ function CalDoneApp() {
           initialEditing={Boolean(manualMeal)}
           creating={Boolean(manualMeal)}
           meal={selectedMeal}
+          onAddDish={() => {
+            setAdditionMealId(selectedMeal.id);
+            setPhotos([]);
+            setNote('');
+            setCaptureError('');
+            setScreen('camera');
+          }}
           units={units}
           onAnswer={(value) => answer(selectedMeal, value)}
           onAskAssistant={() => openAssistant(selectedMeal.id)}

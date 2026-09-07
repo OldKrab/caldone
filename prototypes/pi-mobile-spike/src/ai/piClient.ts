@@ -479,6 +479,8 @@ async function completeMealRequest(
 }
 
 export async function analyzeMeal(input: {
+  signal?: AbortSignal;
+  existingMeal?: import('../domain/meal').MealAnalysis;
   requireSearch?: boolean;
   assistantInterpretation?: string;
   photos: ImageInput[];
@@ -502,7 +504,7 @@ export async function analyzeMeal(input: {
       response = await completeMealRequest(
         model,
         {
-          systemPrompt: buildMealAnalysisPrompt(input.language),
+          systemPrompt: buildMealAnalysisPrompt(input.language, Boolean(input.existingMeal)),
           messages: [
             {
               role: 'user',
@@ -513,6 +515,7 @@ export async function analyzeMeal(input: {
         },
         {
           ...requestOptions,
+          signal: input.signal,
           // React Native's built-in fetch historically lacked a streaming body.
           // Expo's implementation supplies the ReadableStream contract Pi consumes.
           fetch: expoFetch as typeof globalThis.fetch,
