@@ -1,6 +1,6 @@
 {
   "name": "caldone-pi-mobile-spike",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "main": "index.ts",
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.84.4",
