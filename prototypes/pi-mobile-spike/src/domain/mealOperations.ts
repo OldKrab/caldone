@@ -1,4 +1,5 @@
 import type { DailyGoals, Meal, MealAnalysis, MealItem, MealPhoto, MealType, NutritionTotals } from './meal';
+import { parseMealWebImage } from './mealWebImage.ts';
 
 export type MealEdit = {
   capturedAt?: number;
@@ -37,10 +38,12 @@ export function analysisFromItems(input: {
 }
 
 export function normalizeMealAnalysis(analysis: MealAnalysis): MealAnalysis {
+  const webImage = parseMealWebImage(analysis.webImage);
   return {
     ...analysisFromItems(analysis),
     clarification: analysis.clarification,
     research: analysis.research,
+    ...(webImage ? { webImage } : {}),
   };
 }
 

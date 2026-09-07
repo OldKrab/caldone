@@ -1,3 +1,4 @@
+import { MealWebImage } from '../../components/MealWebImage';
 import { MealProgress } from '../../components/MealProgress';
 import { QuestionAnswers } from '../../components/QuestionAnswers';
 import { canAddDish } from '../../domain/mealAddition';
@@ -291,6 +292,8 @@ function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: Nutrit
           ))}
         </ScrollView>
       )}
+
+      {props.meal.photos.length === 0 && props.analysis.webImage && <MealWebImage key={props.analysis.webImage.url} image={props.analysis.webImage} />}
 
       {props.meal.note.trim() && (
         <View style={styles.noteBlock}>

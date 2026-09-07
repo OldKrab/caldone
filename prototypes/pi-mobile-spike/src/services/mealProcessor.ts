@@ -20,7 +20,8 @@ import {
 import { appendInlineMealAnswer, ensureClarificationThread, syncMealQuestionsToThread } from '../data/chatRepository';
 import { mealQuestions } from '../domain/meal';
 import type { MealAnalysis } from '../domain/meal';
-import { parseMealAnalysis } from '../domain/meal';
+import { parseMealResult } from './mealWebImage';
+import { mealAnalysisEvidenceJson } from '../domain/mealWebImage';
 import {
   defaultNotificationPreferences,
   parsePreference,
@@ -149,7 +150,7 @@ export async function processMeal(id: string): Promise<void> {
       language: locale === 'ru' ? 'Russian' : 'English',
       onActivity: (activity) => setMealActivity(id, activity),
     });
-    const analysis = { ...parseMealAnalysis(result.text), research: result.research };
+    const analysis = await parseMealResult(result, meal.photos.length > 0);
     setMealActivity(id, 'saving_result');
     await saveMealAnalysis(id, analysis);
     const questions = mealQuestions(analysis.clarification);
@@ -205,7 +206,7 @@ export async function answerMealClarification(id: string, answer: string, answer
         signal,
         photos,
         note: evidence.note,
-        previousJson: JSON.stringify(evidence.analysis),
+        previousJson: mealAnalysisEvidenceJson(evidence.analysis),
         question: questions.join('\n'),
         answer,
         assistantInterpretation: context?.assistantInterpretation,
@@ -213,7 +214,7 @@ export async function answerMealClarification(id: string, answer: string, answer
         language: locale === 'ru' ? 'Russian' : 'English',
         onActivity: (activity) => setMealActivity(id, activity),
       });
-      const analysis = mergeDishClarification(meal.analysis, { ...parseMealAnalysis(result.text), research: result.research });
+      const analysis = mergeDishClarification(meal.analysis, await parseMealResult(result, meal.photos.length > 0));
       setMealActivity(id, 'saving_result');
       await saveMealAnalysis(id, analysis);
       const remainingQuestions = mealQuestions(analysis.clarification);
@@ -249,12 +250,12 @@ export async function correctSavedMeal(id: string, correction: string): Promise<
     setMealActivity(id, 'reviewing_meal');
     const result = await correctMealAnalysis({
       mealId: id,
-      previousJson: JSON.stringify(meal.analysis),
+      previousJson: mealAnalysisEvidenceJson(meal.analysis),
       correction,
       language: locale === 'ru' ? 'Russian' : 'English',
       onActivity: (activity) => setMealActivity(id, activity),
     });
-    const analysis = { ...parseMealAnalysis(result.text), research: result.research };
+    const analysis = await parseMealResult(result, meal.photos.length > 0);
     delete analysis.clarification;
     setMealActivity(id, 'saving_result');
     await saveMealAnalysis(id, analysis);
@@ -298,7 +299,7 @@ export async function reanalyzeSavedMeal(id: string, instruction?: string, conte
       language: locale === 'ru' ? 'Russian' : 'English',
       onActivity: (activity) => setMealActivity(id, activity),
     });
-    const analysis = { ...parseMealAnalysis(result.text), research: result.research };
+    const analysis = await parseMealResult(result, meal.photos.length > 0);
     setMealActivity(id, 'saving_result');
     await saveMealAnalysis(id, analysis);
   } catch (error) {
