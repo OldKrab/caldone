@@ -1,3 +1,4 @@
+import { parseMealWebImage } from './mealWebImage.ts';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 
 import type { GoalProfile } from './goalEstimator.ts';
@@ -256,7 +257,8 @@ function parseAnalysis(value: unknown): MealAnalysis {
       note: text(scope.note, 'dishAddition.note', 100_000),
     };
   }
-  return { title: text(source.title, 'meal.analysis.title', 10_000), mealType: mealType as MealAnalysis['mealType'], items, totals, clarification, ...(dishAddition ? { dishAddition } : {}) };
+  const webImage = parseMealWebImage(source.webImage);
+  return { ...(webImage ? { webImage } : {}), title: text(source.title, 'meal.analysis.title', 10_000), mealType: mealType as MealAnalysis['mealType'], items, totals, clarification, ...(dishAddition ? { dishAddition } : {}) };
 }
 
 function parseNutrition(value: unknown, name: string) {

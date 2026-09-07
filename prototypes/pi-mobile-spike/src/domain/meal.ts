@@ -16,6 +16,8 @@ export type NutritionTotals = {
 export type MealItem = NutritionTotals & { name: string; quantity: string };
 
 export type MealAnalysis = {
+  /** Optional display-only artwork; never part of the user's photo evidence. */
+  webImage?: import('./mealWebImage').MealWebImage;
   /** While an added dish has open questions, protect the original item prefix
    * and send only the addition's evidence to clarification requests. Persisted
    * with the analysis so answering after an app restart has the same scope. */
@@ -93,7 +95,7 @@ export function parseMealAnalysis(text: string): MealAnalysis {
   ) {
     throw new Error('The model returned an invalid meal result');
   }
-  return normalizeMealAnalysis({ ...value, research: undefined, clarification } as MealAnalysis);
+  return normalizeMealAnalysis({ ...value, webImage: undefined, research: undefined, clarification } as MealAnalysis);
 }
 
 function validTotals(value: Partial<NutritionTotals>): boolean {

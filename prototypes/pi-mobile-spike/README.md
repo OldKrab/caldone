@@ -20,6 +20,8 @@ Dish additions stay on the capture/description screen until analysis and saving 
 
 Captured photos stay in private app storage and never enter the system gallery automatically. They remain attached to the meal so the user and assistant can inspect them later; saving or sharing a photo requires an explicit user action.
 
+Text-only meal research can attach one representative image from a matching search source's Open Graph or Twitter preview metadata. The journal marks it **Web**; meal details show **From web · illustrative** and link to the source. The app stores the image and source URLs separately from user photos, includes them in backups, and excludes artwork from later AI evidence. Loading the remote image needs network access. Missing previews, redirects, failed image loads, and page lookups exceeding three seconds are skipped without failing the meal. Artwork does not trigger an extra model search.
+
 The interface and formatting are localized in English and Russian. Provider authorization and multimodal transport remain isolated under `src/ai`; meal prompts, persistence, and processing live outside that boundary.
 
 ## Run and verify

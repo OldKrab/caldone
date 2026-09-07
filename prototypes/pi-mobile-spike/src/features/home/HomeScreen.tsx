@@ -1,3 +1,4 @@
+import { MealWebImage } from '../../components/MealWebImage';
 import { mealActivityLabel } from '../../components/MealProgress';
 import { Ionicons } from '@expo/vector-icons';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -203,6 +204,8 @@ export function HomeScreen(props: {
                   >
                     {meal.photos[0] ? (
                       <Image source={{ uri: meal.photos[0].uri }} style={styles.photo} />
+                    ) : meal.analysis?.webImage ? (
+                      <MealWebImage key={meal.analysis.webImage.url} image={meal.analysis.webImage} compact />
                     ) : (
                       <View style={styles.textMealMark}>
                         <Ionicons name="restaurant-outline" size={24} color={color.action} />
