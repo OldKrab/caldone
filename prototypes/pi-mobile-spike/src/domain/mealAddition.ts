@@ -53,7 +53,15 @@ export function dishClarificationInput(meal: Meal): { analysis: MealAnalysis; ph
  * its entire result or the user added a second serving of an existing food. */
 export function mergeDishClarification(previous: MealAnalysis, answer: MealAnalysis): MealAnalysis {
   const scope = previous.dishAddition;
-  if (!scope) return answer;
+  if (!scope) {
+    // A quantity answer does not invalidate illustrative artwork. A different
+    // food does; do not carry the old product image across that correction.
+    const foodNames = (analysis: MealAnalysis) => JSON.stringify(analysis.items.map(item => item.name.trim().toLowerCase()).sort());
+    if (!answer.webImage && previous.webImage && foodNames(previous) === foodNames(answer)) {
+      return { ...answer, webImage: previous.webImage };
+    }
+    return answer;
+  }
   const items = [...previous.items.slice(0, scope.originalItemCount), ...answer.items];
   return {
     ...previous, items, totals: sumMealItems(items),

@@ -13,7 +13,7 @@ const sources: Record<string, string> = {
   'expo-notifications': 'export const setNotificationHandler=()=>{};',
   'react-native': 'export const AppState={currentState:"active"};export const Platform={OS:"android"};',
   '../ai/piClient': `export async function analyzeMeal(input){globalThis.__textMeal.input=input;return {text:JSON.stringify({webImageSourceUrl:globalThis.__textMeal.withWebImage?'https://food.example.com/eggs':undefined,title:'Eggs and toast',mealType:'breakfast',items:[{name:'Eggs and toast',quantity:'1 portion',calories:250,protein:15,carbs:20,fat:12}],totals:{calories:250,protein:15,carbs:20,fat:12}}),research:globalThis.__textMeal.withWebImage?{status:'completed',sources:[{url:'https://food.example.com/eggs',title:'Eggs'}]}:undefined}};export const correctMealAnalysis=()=>{};export const refineMealAnalysis=()=>{};`,
-  '../data/mealRepository': `export const getMeal=async()=>({id:'text-meal',photos:[],note:globalThis.__textMeal.note,status:'queued'});
+  '../data/mealRepository': `export const appendDiagnosticEvent=async()=>{};export const getMeal=async()=>({id:'text-meal',photos:[],note:globalThis.__textMeal.note,status:'queued'});
     export const listProcessableMeals=async()=>[{id:'text-meal'}];
     export const saveMealAnalysis=async(id,analysis)=>{globalThis.__textMeal.saved=analysis};
     export const recordMealFailure=async(id,error)=>{globalThis.__textMeal.failures.push(error);return false};

@@ -85,3 +85,22 @@ test('test capture observes the real mobile Codex wire payload and parsed answer
     assert.equal(JSON.stringify(fixture.trace).includes(token), false);
   } finally { process.getBuiltinModule = getBuiltinModule; }
 });
+
+test('a text-only meal actively requests search without making artwork a prerequisite for nutrition', async () => {
+  fixture.enabled = true;
+  fixture.search = false;
+  const result = await analyzeMeal({ mealId: 'text-image', photos: [], note: 'Two eggs on toast', language: 'English' });
+  assert.deepEqual(fixture.payload.tool_choice, { type: 'web_search' });
+  assert.equal(result.research.status, 'not_searched');
+  fixture.enabled = false;
+  await analyzeMeal({ mealId: 'text-offline', photos: [], note: 'Two eggs on toast', language: 'English' });
+  assert.equal(fixture.payload.tools, undefined);
+});
+
+test('automatic artwork search respects an explicit request not to search', async () => {
+  fixture.enabled = true;
+  for (const note of ['Two eggs. Do not search the web.', 'Два яйца. Не ищи в интернете.']) {
+    await analyzeMeal({ mealId: 'no-search', photos: [], note, language: 'English' });
+    assert.equal(fixture.payload.tool_choice, 'auto');
+  }
+});

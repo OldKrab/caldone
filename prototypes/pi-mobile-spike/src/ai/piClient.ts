@@ -1,3 +1,4 @@
+import { declinesWebSearch } from '../domain/mealResearch';
 import { mealRequestDiagnostics } from '../services/mealRequestTraceStore';
 import type { MealRequestCapture } from './mealRequestTrace';
 import { trackedSearchFetch, withHostedSearch } from './hostedSearch';
@@ -447,6 +448,7 @@ async function completeMealRequest(
   onActivity?: (activity: MealModelActivity) => void,
   requireSearch = false,
   capture?: MealRequestCapture,
+  seekImage = false,
 ): Promise<AssistantMessage & { research: MealResearch }> {
   return retryConnection(() => requestWithDeadline(async signal => {
     let answerStarted = false;
@@ -458,7 +460,7 @@ async function completeMealRequest(
     const stream = models.streamSimple(model, context, {
       ...options,
       signal,
-      onPayload: options.onPayload ? payload => withHostedSearch(payload, requireSearch) : undefined,
+      onPayload: options.onPayload ? payload => withHostedSearch(payload, requireSearch || seekImage) : undefined,
       fetch: options.onPayload ? tracked.fetch : requestFetch,
     });
     for await (const event of stream) {
@@ -524,6 +526,7 @@ export async function analyzeMeal(input: {
         input.onActivity,
         input.requireSearch ?? explicitlyRequestsSearch(input.note ?? ''),
         capture,
+        input.photos.length === 0 && !declinesWebSearch(input.note ?? ''),
       );
       await recordAiDiagnostic({ operation: 'analyze', mealId: input.mealId, model, startedAt, response, research: response.research });
     } catch (error) {

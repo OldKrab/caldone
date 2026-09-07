@@ -91,7 +91,11 @@ export type SearchDiagnosticEvent = {
   status: 'active' | 'complete' | 'error';
 };
 
-export type DiagnosticEvent = AiDiagnosticEvent | LayoutDiagnosticEvent | LifecycleDiagnosticEvent | CameraDiagnosticEvent | SearchDiagnosticEvent;
+export type ImageLookupDiagnosticEvent = import('../services/mealWebImage').ImageLookupEvent & {
+  id: string; createdAt: number; mealId: string; operation: 'image_lookup';
+};
+
+export type DiagnosticEvent = ImageLookupDiagnosticEvent | AiDiagnosticEvent | LayoutDiagnosticEvent | LifecycleDiagnosticEvent | CameraDiagnosticEvent | SearchDiagnosticEvent;
 
 function fromRow(row: MealRow): Meal {
   const parsedPhotos = JSON.parse(row.photos_json) as Array<Partial<MealPhoto> & Pick<MealPhoto, 'uri' | 'mimeType'>>;

@@ -1,31 +1,58 @@
+import { matchingProductImage, matchesMeal } from './mealImagePage.ts';
 import { parseMealAnalysis, type MealAnalysis } from '../domain/meal.ts';
 import type { MealResearch } from '../domain/mealResearch.ts';
 import { publicWebUrl, type MealWebImage } from '../domain/mealWebImage.ts';
 
-const MAX_PAGE_BYTES = 256 * 1024;
+const MAX_PAGE_BYTES = 2 * 1024 * 1024;
 const PAGE_TIMEOUT_MS = 3000;
 
-/** The model selects a relevant cited page, but only its actual preview metadata
+export type ImageLookupEvent = {
+  outcome: 'user_photos' | 'not_searched' | 'no_sources' | 'fetch_failed' | 'no_match' | 'found';
+  sourceHost?: string;
+  durationMs: number;
+};
+
+/** Observed search sources supply candidate pages; actual page markup
  * supplies the image URL. Artwork failure must never fail nutrition processing. */
 export async function parseMealResult(
   result: { text: string; research?: MealResearch },
   hasUserPhotos: boolean,
   fetchPage?: typeof globalThis.fetch,
+  onLookup?: (event: ImageLookupEvent) => void,
 ): Promise<MealAnalysis> {
   const analysis = { ...parseMealAnalysis(result.text), research: result.research };
-  if (hasUserPhotos || result.research?.status !== 'completed') return analysis;
+  const startedAt = Date.now();
+  const report = (outcome: ImageLookupEvent['outcome'], sourceUrl?: string) => {
+    try { onLookup?.({ outcome, ...(sourceUrl ? { sourceHost: new URL(sourceUrl).hostname } : {}), durationMs: Date.now() - startedAt }); }
+    catch { /* Diagnostics cannot affect a saved meal. */ }
+  };
+  if (hasUserPhotos) { report('user_photos'); return analysis; }
+  if (result.research?.status !== 'completed') { report('not_searched'); return analysis; }
   const raw = JSON.parse(result.text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
-  const sourceUrl = publicWebUrl(raw.webImageSourceUrl);
-  if (!sourceUrl || !result.research.sources.some(source => publicWebUrl(source.url) === sourceUrl)) return analysis;
+  const names = [analysis.title, ...analysis.items.map(item => item.name)];
+  const observed = new Set(result.research.sources.map(source => publicWebUrl(source.url)).filter((url): url is string => Boolean(url)));
+  const hinted = [raw.webImageSourceUrl, ...(Array.isArray(raw.webImageSourceUrls) ? raw.webImageSourceUrls.slice(0, 3) : [])]
+    .map(publicWebUrl).filter((url): url is string => Boolean(url && observed.has(url)));
+  const relevant = result.research.sources.filter(source => matchesMeal(source.title, names))
+    .map(source => publicWebUrl(source.url)).filter((url): url is string => Boolean(url));
+  // Three sequential, individually bounded requests keep a broken source from
+  // defeating the lookup without allowing an unbounded background crawl.
+  const candidates = [...new Set([...hinted, ...relevant, ...observed])].slice(0, 3);
+  if (!candidates.length) { report('no_sources'); return analysis; }
   try {
-    // Expo fetch provides streaming on native; stop after the page head/size cap.
     const fetch = fetchPage ?? (await import('expo/fetch')).fetch as typeof globalThis.fetch;
-    const webImage = await fetchPreviewImage(sourceUrl, fetch);
-    return webImage ? { ...analysis, webImage } : analysis;
-  } catch { return analysis; }
+    for (const sourceUrl of candidates) {
+      try {
+        const webImage = await fetchPreviewImage(sourceUrl, fetch, names, hinted.includes(sourceUrl) || relevant.includes(sourceUrl));
+        if (webImage) { report('found', sourceUrl); return { ...analysis, webImage }; }
+        report('no_match', sourceUrl);
+      } catch { report('fetch_failed', sourceUrl); }
+    }
+  } catch { report('fetch_failed'); }
+  return analysis;
 }
 
-async function fetchPreviewImage(sourceUrl: string, fetchPage: typeof globalThis.fetch): Promise<MealWebImage | undefined> {
+async function fetchPreviewImage(sourceUrl: string, fetchPage: typeof globalThis.fetch, names: string[], allowPreview: boolean): Promise<MealWebImage | undefined> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PAGE_TIMEOUT_MS);
   try {
@@ -36,7 +63,7 @@ async function fetchPreviewImage(sourceUrl: string, fetchPage: typeof globalThis
     });
     if (!response.ok || !response.headers.get('content-type')?.includes('text/html')) {
       await response.body?.cancel();
-      return undefined;
+      throw new Error('Image source did not return an HTML page');
     }
     const reader = response.body?.getReader();
     if (!reader) return undefined;
@@ -49,10 +76,9 @@ async function fetchPreviewImage(sourceUrl: string, fetchPage: typeof globalThis
         if (done) break;
         html += decoder.decode(value.subarray(0, MAX_PAGE_BYTES - bytes), { stream: true });
         bytes += value.byteLength;
-        if (/<\/head\s*>/i.test(html)) break;
       }
     } finally { await reader.cancel(); }
-    const url = previewImageUrl(html.split(/<\/head\s*>/i)[0], sourceUrl);
+    const url = matchingProductImage(html, sourceUrl, names) ?? (allowPreview ? previewImageUrl(html.split(/<\/head\s*>/i)[0], sourceUrl) : undefined);
     return url ? { url, sourceUrl } : undefined;
   } finally { clearTimeout(timeout); }
 }
@@ -78,7 +104,7 @@ export function previewImageUrl(html: string, sourceUrl: string): string | undef
         return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
       });
       const url = publicWebUrl(new URL(decoded, sourceUrl).href);
-      if (url && !candidates.has(name)) candidates.set(name, url);
+      if (url && !/(?:logo|icon|placeholder|gray[_-]?bg)/i.test(url) && !candidates.has(name)) candidates.set(name, url);
     } catch { /* Invalid optional artwork is omitted. */ }
   }
   return candidates.get('og:image:secure_url') ?? candidates.get('og:image') ?? candidates.get('twitter:image') ?? candidates.get('twitter:image:src');

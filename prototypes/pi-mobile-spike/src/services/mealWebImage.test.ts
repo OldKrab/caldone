@@ -38,13 +38,14 @@ test('text research uses real cited page metadata, never model-authored image UR
 });
 
 test('user photos, missing search, and uncited candidate pages never trigger requests', async () => {
-  const noFetch: typeof fetch = async () => { assert.fail('Must not fetch artwork'); };
+  let requests = 0;
+  const noFetch: typeof fetch = async () => { requests++; throw new Error('Must not fetch artwork'); };
   assert.equal((await parseMealResult(result, true, noFetch)).webImage, undefined);
   for (const status of ['not_searched', 'failed', 'unavailable', 'unobserved'] as const) {
     assert.equal((await parseMealResult({ ...result, research: { ...result.research, status } }, false, noFetch)).webImage, undefined);
   }
   assert.equal((await parseMealResult({ ...result, research: { status: 'completed', sources: [] } }, false, noFetch)).webImage, undefined);
-  assert.equal((await parseMealResult({ text: JSON.stringify(meal), research: result.research }, false, noFetch)).webImage, undefined);
+  assert.equal(requests, 0);
 });
 
 test('missing, non-HTML, oversized, and failed pages do not fail the meal', async () => {
@@ -52,7 +53,7 @@ test('missing, non-HTML, oversized, and failed pages do not fail the meal', asyn
     async () => page('<head><title>Eggs</title></head>'),
     async () => new Response(html, { status: 403 }),
     async () => new Response(html, { headers: { 'content-type': 'image/png' } }),
-    async () => page(' '.repeat(256 * 1024) + html),
+    async () => page(' '.repeat(2 * 1024 * 1024) + html),
     async () => { throw new Error('Offline'); },
     async () => page('<head></head>' + html),
   ];
@@ -93,4 +94,64 @@ test('backup retains display metadata without counting it as a user photo', asyn
   assert.deepEqual(restored.meals[0].photos, []);
   backup.meals[0].analysis.webImage = { ...artwork, url: 'file:///tmp/private.jpg' };
   assert.equal(parseCalDoneBackup(backup).meals[0].analysis?.webImage, undefined);
+});
+
+test('a matching lazy-loaded product photo is found after the page head', async () => {
+  // Reduced from the actual Milti menu markup that the released resolver missed.
+  const title = 'Милти Лазанья с курицей и пастой из гречневой муки';
+  const product = { ...result, text: JSON.stringify({ ...meal, title, items: [{ ...meal.items[0], name: title }] , webImageSourceUrl: sourceUrl }) };
+  const body = `<head><title>Милти меню</title></head><body>
+    <img src="/logo.png" alt="Милти">
+    <img data-src="/beef.jpg" alt="Милти Итальянская лазанья с говядиной">
+    <img src="/gray.gif" data-src="/chicken.jpg" alt="Милти: Лазанья с курицей и пастой из гречневой муки">
+  </body>`;
+  const analysis = await parseMealResult(product, false, async () => page(body));
+  assert.equal(analysis.webImage?.url, 'https://food.example.com/chicken.jpg');
+});
+
+test('image lookup uses relevant search results without optional model hints and tries another source', async () => {
+  const fallback = 'https://shop.example.com/eggs';
+  const requests: string[] = [];
+  const searched = { text: JSON.stringify(meal), research: { status: 'completed' as const, sources: [
+    { url: 'https://unrelated.example.com/cakes', title: 'Chocolate cake' },
+    { url: sourceUrl, title: 'Eggs' }, { url: fallback, title: 'Eggs product' },
+  ] } };
+  const analysis = await parseMealResult(searched, false, async url => {
+    requests.push(String(url));
+    return String(url) === sourceUrl ? new Response('', { status: 403 }) : page();
+  });
+  assert.deepEqual(requests, [sourceUrl, fallback]);
+  assert.deepEqual(analysis.webImage, { ...artwork, sourceUrl: fallback });
+});
+
+test('answering a portion question preserves artwork, but changing the food does not', async () => {
+  const { mergeDishClarification } = await import('../domain/mealAddition.ts');
+  const previous = await parseMealResult(result, false, async () => page());
+  const answer = await parseMealResult({ text: JSON.stringify({ ...meal, items: [{ ...meal.items[0], quantity: '3 eggs' }] }) }, false);
+  assert.deepEqual(mergeDishClarification(previous, answer).webImage, artwork);
+  const changed = { ...answer, items: [{ ...answer.items[0], name: 'Chocolate cake' }] };
+  assert.equal(mergeDishClarification(previous, changed).webImage, undefined);
+});
+
+test('a generic menu source can supply a labelled food photo, but not its site preview', async () => {
+  const searched = { text: JSON.stringify(meal), research: { status: 'completed' as const, sources: [{ url: sourceUrl, title: 'Restaurant menu' }] } };
+  const analysis = await parseMealResult(searched, false, async () => page('<head><meta property="og:image" content="/logo.jpg"></head><body><img src="/eggs.jpg" alt="Eggs"></body>'));
+  assert.equal(analysis.webImage?.url, 'https://food.example.com/eggs.jpg');
+  assert.equal((await parseMealResult(searched, false, async () => page())).webImage, undefined);
+});
+
+test('diagnostics distinguish lookup failure from missing search without exposing page URLs', async () => {
+  const events: Array<{ outcome: string; sourceHost?: string }> = [];
+  const observe = (event: { outcome: string; sourceHost?: string }) => events.push(event);
+  await parseMealResult({ text: JSON.stringify(meal) }, false, undefined, observe);
+  await parseMealResult(result, false, async () => { throw new Error('Offline'); }, observe);
+  await parseMealResult(result, false, async () => page(), observe);
+  assert.deepEqual(events.map(event => event.outcome), ['not_searched', 'fetch_failed', 'found']);
+  assert.equal(events[1].sourceHost, 'food.example.com');
+  assert.ok(!JSON.stringify(events).includes('/products/eggs'));
+});
+
+test('a site logo is not used as a meal image even on a selected product page', async () => {
+  const analysis = await parseMealResult(result, false, async () => page('<head><meta property="og:image" content="/site-logo.png"></head><body><img alt="Chocolate cake" src="/cake.jpg"></body>'));
+  assert.equal(analysis.webImage, undefined);
 });
