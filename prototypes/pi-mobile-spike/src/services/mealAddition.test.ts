@@ -31,7 +31,7 @@ const sources: Record<string, string> = {
   'expo-notifications': 'export const setNotificationHandler=()=>{};',
   'react-native': 'export const AppState={currentState:"active"};export const Platform={OS:"android"};',
   '../ai/piClient': `export async function analyzeMeal(input){const f=globalThis.__dishAddition; f.input=input; await f.afterAnalyze(); if(f.fail)throw new Error('offline');return {text:JSON.stringify(f.result)}};export const refineMealAnalysis=analyzeMeal;export const correctMealAnalysis=analyzeMeal;`,
-  '../data/mealRepository': `export const getMeal=async()=>structuredClone(globalThis.__dishAddition.meal);
+  '../data/mealRepository': `export const appendDiagnosticEvent=async()=>{};export const getMeal=async()=>structuredClone(globalThis.__dishAddition.meal);
     export async function replaceMealIfRevision(meal,revision){const f=globalThis.__dishAddition; if(f.meal?.revision!==revision)return undefined; f.saves++;f.meal={...meal,revision:revision+1};return f.meal;}
     export const saveMealAnalysis=async(id,analysis)=>{const f=globalThis.__dishAddition;f.meal.analysis=analysis;f.meal.status=analysis.clarification?'needs_input':'complete'};
     export const setMealStatus=async(id,status)=>{globalThis.__dishAddition.meal.status=status};

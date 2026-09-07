@@ -9,6 +9,7 @@ import { AppState, Platform } from 'react-native';
 
 import { analyzeMeal, correctMealAnalysis, refineMealAnalysis } from '../ai/piClient';
 import {
+  appendDiagnosticEvent,
   getMeal,
   getPreference,
   listProcessableMeals,
@@ -29,6 +30,14 @@ import {
 } from '../domain/preferences';
 import { locale, t } from '../i18n';
 import { setMealActivity } from './mealActivity';
+
+/** Keep lookup outcomes in the existing diagnostic export, without page paths. */
+function imageLookupDiagnostics(mealId: string) {
+  return (event: import('./mealWebImage').ImageLookupEvent) => {
+    const createdAt = Date.now();
+    void appendDiagnosticEvent({ id: `${createdAt}-image-${Math.random().toString(36).slice(2)}`, createdAt, mealId, operation: 'image_lookup', ...event }).catch(() => undefined);
+  };
+}
 
 const processing = new Set<string>();
 const REMINDER_ID_KEY = 'daily_reminder_notification_id';
@@ -150,7 +159,7 @@ export async function processMeal(id: string): Promise<void> {
       language: locale === 'ru' ? 'Russian' : 'English',
       onActivity: (activity) => setMealActivity(id, activity),
     });
-    const analysis = await parseMealResult(result, meal.photos.length > 0);
+    const analysis = await parseMealResult(result, meal.photos.length > 0, undefined, imageLookupDiagnostics(id));
     setMealActivity(id, 'saving_result');
     await saveMealAnalysis(id, analysis);
     const questions = mealQuestions(analysis.clarification);
@@ -214,7 +223,7 @@ export async function answerMealClarification(id: string, answer: string, answer
         language: locale === 'ru' ? 'Russian' : 'English',
         onActivity: (activity) => setMealActivity(id, activity),
       });
-      const analysis = mergeDishClarification(meal.analysis, await parseMealResult(result, meal.photos.length > 0));
+      const analysis = mergeDishClarification(meal.analysis, await parseMealResult(result, meal.photos.length > 0, undefined, imageLookupDiagnostics(id)));
       setMealActivity(id, 'saving_result');
       await saveMealAnalysis(id, analysis);
       const remainingQuestions = mealQuestions(analysis.clarification);
@@ -255,7 +264,7 @@ export async function correctSavedMeal(id: string, correction: string): Promise<
       language: locale === 'ru' ? 'Russian' : 'English',
       onActivity: (activity) => setMealActivity(id, activity),
     });
-    const analysis = await parseMealResult(result, meal.photos.length > 0);
+    const analysis = await parseMealResult(result, meal.photos.length > 0, undefined, imageLookupDiagnostics(id));
     delete analysis.clarification;
     setMealActivity(id, 'saving_result');
     await saveMealAnalysis(id, analysis);
@@ -299,7 +308,7 @@ export async function reanalyzeSavedMeal(id: string, instruction?: string, conte
       language: locale === 'ru' ? 'Russian' : 'English',
       onActivity: (activity) => setMealActivity(id, activity),
     });
-    const analysis = await parseMealResult(result, meal.photos.length > 0);
+    const analysis = await parseMealResult(result, meal.photos.length > 0, undefined, imageLookupDiagnostics(id));
     setMealActivity(id, 'saving_result');
     await saveMealAnalysis(id, analysis);
   } catch (error) {

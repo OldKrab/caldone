@@ -21,7 +21,7 @@ const sources:Record<string,string>={
     export const recordChatAction=async action=>({...action,id:'a'});export const appendInlineMealAnswer=async()=>{};
     export const ensureClarificationThread=async()=>({id:'clarification-thread'});
     export const syncMealQuestionsToThread=async(threadId,mealId,questions)=>{globalThis.__mealHandoff.questions.push({threadId,questions})};`,
-  '../data/mealRepository':`export const getMeal=async()=>globalThis.__mealHandoff.meal;export const replaceMealIfRevision=async meal=>{globalThis.__mealHandoff.meal={...meal,revision:meal.revision+1};return globalThis.__mealHandoff.meal};
+  '../data/mealRepository':`export const appendDiagnosticEvent=async()=>{};export const getMeal=async()=>globalThis.__mealHandoff.meal;export const replaceMealIfRevision=async meal=>{globalThis.__mealHandoff.meal={...meal,revision:meal.revision+1};return globalThis.__mealHandoff.meal};
     export const saveMealAnalysis=async(id,analysis)=>{const f=globalThis.__mealHandoff;f.saved++;f.meal={...f.meal,analysis,revision:f.meal.revision+1}};
     export const setMealStatus=async()=>{};export const getPreference=async()=>null;
     ${['listProcessableMeals','recordMealFailure','savePreference','deleteMealIfRevision','getDailyGoals','getGoalProfile','listMeals','saveDailyGoals','saveGoalProfile','saveMealRecord'].map(name=>`export const ${name}=async()=>{};`).join('')}`,

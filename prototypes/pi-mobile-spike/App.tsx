@@ -701,6 +701,10 @@ function CalDoneApp() {
         ai: { provider, model: model ?? 'automatic', thinkingLevel: thinkingLevel ?? 'automatic', webSearchEnabled },
         events: events.map((event) => {
           if (event.operation === 'layout' || event.operation === 'lifecycle' || event.operation === 'camera' || event.operation === 'web_search') return event;
+          if (event.operation === 'image_lookup') {
+            const { mealId: _mealId, ...metadata } = event;
+            return metadata;
+          }
           const { outputText: _outputText, mealId: _mealId, threadId: _threadId, ...metadata } = event;
           return metadata;
         }),
