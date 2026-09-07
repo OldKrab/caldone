@@ -292,15 +292,15 @@ export function AssistantScreen(props: {
         >
           <View style={styles.header}>
             <IconButton icon="time-outline" label={t('chatHistory')} onPress={props.onHistory} />
-            <Text adjustsFontSizeToFit minimumFontScale={0.86} numberOfLines={1} style={styles.headerTitle}>{t('assistant')}</Text>
+            <Text selectable adjustsFontSizeToFit minimumFontScale={0.86} numberOfLines={1} style={styles.headerTitle}>{t('assistant')}</Text>
             <IconButton ref={menuButton} icon="ellipsis-horizontal" label={t('assistantOptions')} onPress={showHeaderMenu} />
           </View>
           {props.selectedMeal && (
             <View style={styles.mealContext}>
               {props.selectedMeal.photos[0] && <Image source={{ uri: props.selectedMeal.photos[0].uri }} style={styles.mealContextPhoto} />}
               <View style={styles.mealContextCopy}>
-                <Text style={styles.mealContextLabel}>{t('mealContext')}</Text>
-                <Text numberOfLines={1} style={styles.mealContextTitle}>{props.selectedMeal.analysis?.title ?? t('meal')}</Text>
+                <Text selectable style={styles.mealContextLabel}>{t('mealContext')}</Text>
+                <Text selectable numberOfLines={1} style={styles.mealContextTitle}>{props.selectedMeal.analysis?.title ?? t('meal')}</Text>
               </View>
               <IconButton icon="close" label={t('clearMealContext')} onPress={props.onClearMealContext} />
             </View>
@@ -335,9 +335,9 @@ export function AssistantScreen(props: {
               <MealProgress label={t('assistantWorking')} />
             )}
             {props.selectedMeal?.error && !snapshot.mealActivity && !snapshot.busy && !snapshot.error &&
-              <Text accessibilityRole="alert" style={styles.error}>{connectionErrorText(props.selectedMeal.error, locale)}</Text>}
+              <Text selectable accessibilityRole="alert" style={styles.error}>{connectionErrorText(props.selectedMeal.error, locale)}</Text>}
             {snapshot.error && !snapshot.busy && <View>
-              <Text accessibilityRole="alert" style={styles.error}>{connectionErrorText(snapshot.error, locale)}</Text>
+              <Text selectable accessibilityRole="alert" style={styles.error}>{connectionErrorText(snapshot.error, locale)}</Text>
               <Pressable accessibilityRole="button" disabled={Boolean(snapshot.mealActivity)} onPress={() => void session?.retry().catch(() => undefined)} style={styles.stepsToggle}>
                 <Ionicons name="refresh-outline" size={18} color={color.action} />
                 <Text style={styles.stepsLabel}>{locale === 'ru' ? 'Повторить' : 'Retry'}</Text>
@@ -417,7 +417,7 @@ export function ChatHistoryScreen(props: {
       <ScreenReveal>
         <View style={styles.historyHeader}>
           <IconButton icon="arrow-back" label={t('back')} onPress={props.onBack} />
-          <Text adjustsFontSizeToFit minimumFontScale={0.86} numberOfLines={1} style={styles.headerTitle}>{t('chatHistory')}</Text>
+          <Text selectable adjustsFontSizeToFit minimumFontScale={0.86} numberOfLines={1} style={styles.headerTitle}>{t('chatHistory')}</Text>
           <IconButton icon="add" label={t('newChat')} onPress={props.onNewChat} />
         </View>
         <ScrollView contentContainerStyle={styles.historyList}>
@@ -453,8 +453,8 @@ function AssistantInstructionsModal(props: {
         <Pressable accessibilityLabel={t('close')} accessibilityRole="button" onPress={props.onCancel} style={StyleSheet.absoluteFill} />
         <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.instructionsSafeArea}>
           <View accessibilityViewIsModal style={styles.instructionsSheet}>
-            <Text accessibilityRole="header" style={styles.instructionsTitle}>{t('assistantInstructions')}</Text>
-            <Text style={styles.instructionsHelp}>{t('assistantInstructionsHelp')}</Text>
+            <Text selectable accessibilityRole="header" style={styles.instructionsTitle}>{t('assistantInstructions')}</Text>
+            <Text selectable style={styles.instructionsHelp}>{t('assistantInstructionsHelp')}</Text>
             <TextInput
               autoFocus
               maxLength={4000}
@@ -488,7 +488,7 @@ function EmptyAssistant(props: { selectedMeal: boolean; onSuggestion: (value: st
   return (
     <View style={styles.empty}>
       <View style={styles.emptyMark}><Ionicons name="chatbox-ellipses-outline" size={27} color={color.action} /></View>
-      <Text style={styles.emptyTitle}>{props.selectedMeal ? t('askAboutMeal') : t('assistantReady')}</Text>
+      <Text selectable style={styles.emptyTitle}>{props.selectedMeal ? t('askAboutMeal') : t('assistantReady')}</Text>
       <View style={styles.suggestions}>
         {suggestions.map((suggestion) => (
           <Pressable key={suggestion} accessibilityRole="button" onPress={() => props.onSuggestion(suggestion)} style={({ pressed }) => [styles.suggestion, pressed && styles.threadPressed]}>
@@ -514,7 +514,7 @@ function MessageRow(props: {
     const activeQuestions = questionMessage.questions.filter(question => props.activeQuestions?.includes(question));
     return (
       <View style={styles.questionMessage}>
-        <Text style={styles.questionMessageLabel}>{t('clarificationTitle')}</Text>
+        <Text selectable style={styles.questionMessageLabel}>{t('clarificationTitle')}</Text>
         {questionMessage.questions.filter(question => !activeQuestions.includes(question)).map((question, index) => (
           <Text selectable key={`${question}-${index}`} style={styles.questionMessageText}>{question}</Text>
         ))}
@@ -571,7 +571,7 @@ function ToolActivityRow({ tool }: { tool: ActivityTool }) {
   return <View>
     <View accessibilityLabel={`${label}${status ? `. ${status}` : ''}`} style={styles.toolActivity}>
       <Ionicons name={failed ? 'alert-circle-outline' : tool.status === 'cancelled' ? 'remove-circle-outline' : 'checkmark'} size={16} color={failed ? color.error : color.muted} />
-      <Text style={[styles.toolActivityText, failed && styles.toolActivityError]}>{label}{status ? ` · ${status}` : ''}</Text>
+      <Text selectable style={[styles.toolActivityText, failed && styles.toolActivityError]}>{label}{status ? ` · ${status}` : ''}</Text>
     </View>
     {failed && tool.error && <Text selectable style={styles.error}>{connectionErrorText(tool.error, locale)}</Text>}
   </View>;
@@ -583,7 +583,7 @@ function ProviderActivityRow(props: { activity: ProviderToolActivity }) {
   return (
     <View accessibilityLabel={toolActivityLabel(props.activity.name, {})} style={styles.toolActivity}>
       <Ionicons name={failed ? 'alert-circle-outline' : 'checkmark'} size={16} color={failed ? color.error : color.muted} />
-      <Text numberOfLines={2} style={[styles.toolActivityText, failed && styles.toolActivityError]}>
+      <Text selectable numberOfLines={2} style={[styles.toolActivityText, failed && styles.toolActivityError]}>
         {toolActivityLabel(props.activity.name, {})}
       </Text>
     </View>
@@ -594,7 +594,7 @@ function WorkingRow(props: { label: string }) {
   return (
     <View style={styles.working}>
       <ActivityIndicator color={color.action} size="small" />
-      <Text style={styles.workingText}>{props.label}</Text>
+      <Text selectable style={styles.workingText}>{props.label}</Text>
     </View>
   );
 }
@@ -635,9 +635,9 @@ function ActionRow(props: { action: ChatAction; busy: boolean; onUndo: () => voi
         {!props.action.undone && props.action.canUndo !== false && <Pressable accessibilityRole="button" accessibilityState={{ disabled: props.busy }} disabled={props.busy} onPress={props.onUndo} style={styles.receiptUndo}><Text style={styles.undo}>{props.busy ? t('undoing') : t('undo')}</Text></Pressable>}
       </View>
       {expanded && <View style={styles.receiptDetails}>
-        <Text style={styles.receiptHint}>{props.action.undone ? (locale === 'ru' ? 'Изменение отменено. Ниже — исходное действие.' : 'Undone. Original action shown below.') : (locale === 'ru' ? 'Было → Стало' : 'Before → After')}</Text>
-        {details.length === 0 ? <Text style={styles.receiptValue}>{locale === 'ru' ? 'Подробности изменения в этой записи не сохранены.' : 'Change details were not saved for this action.'}</Text> : details.map((detail) => <View key={detail.label} style={styles.receiptDetail}>
-          <Text style={styles.receiptField}>{detail.label}</Text>
+        <Text selectable style={styles.receiptHint}>{props.action.undone ? (locale === 'ru' ? 'Изменение отменено. Ниже — исходное действие.' : 'Undone. Original action shown below.') : (locale === 'ru' ? 'Было → Стало' : 'Before → After')}</Text>
+        {details.length === 0 ? <Text selectable style={styles.receiptValue}>{locale === 'ru' ? 'Подробности изменения в этой записи не сохранены.' : 'Change details were not saved for this action.'}</Text> : details.map((detail) => <View key={detail.label} style={styles.receiptDetail}>
+          <Text selectable style={styles.receiptField}>{detail.label}</Text>
           <Text selectable style={styles.receiptBefore}>{detail.before ?? '—'}</Text>
           <Text selectable style={styles.receiptValue}>→ {detail.after ?? '—'}</Text>
         </View>)}

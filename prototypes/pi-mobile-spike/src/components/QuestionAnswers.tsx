@@ -61,7 +61,7 @@ export function QuestionAnswers(props: {
       onPress={() => void submit()} style={({ pressed }) => [styles.send, pressed && styles.sendPressed, (disabled || !answer) && styles.disabled]}>
       <Text style={styles.sendText}>{sending ? (locale === 'ru' ? 'Отправляю…' : 'Sending…') : (locale === 'ru' ? 'Отправить ответы' : 'Send answers')}</Text>
     </Pressable>
-    {error && <Text accessibilityRole="alert" style={styles.error}>{t('notificationAnswerError')}</Text>}
+    {error && <Text selectable accessibilityRole="alert" style={styles.error}>{t('notificationAnswerError')}</Text>}
   </View>;
 }
 
