@@ -136,7 +136,16 @@ export function MealDetailScreen(props: {
           style={styles.scroll}
         >
 
-        {!editing && working && <MealProgress mealId={props.meal.id} stage={props.activity} previousEstimate />}
+        {!editing && <View style={styles.mealHeading}>
+          <Text style={styles.title}>{draft.title}</Text>
+          <Text style={styles.mealType}>{t(draft.mealType)} · {formatTime(props.meal.capturedAt)}</Text>
+          {props.meal.note.trim() && <View style={styles.noteBlock}>
+            <Text style={styles.noteLabel}>{t('yourNote')}</Text>
+            <Text style={styles.noteText}>{props.meal.note.trim()}</Text>
+          </View>}
+        </View>}
+
+        {!editing && working && <MealProgress mealId={props.meal.id} stage={props.activity} compact label={t('analyzing')} />}
         {!editing && !working && props.meal.status === 'needs_input' && <Text style={styles.clarificationActivity}>{locale === 'ru' ? 'Предварительная оценка · ожидает уточнения' : 'Provisional estimate · awaiting clarification'}</Text>}
         {!editing && !working && props.meal.status === 'failed' && <Text style={styles.error}>{locale === 'ru' ? 'Пересчёт не завершён. Ниже — предыдущая оценка.' : 'Update failed. The previous estimate is shown below.'}</Text>}
         {!editing && mealQuestions(draft.clarification).length > 0 && (
@@ -168,18 +177,17 @@ export function MealDetailScreen(props: {
             <MealEditor draft={draft} time={time} onChange={setDraft} onTimeChange={setTime} />
           </>
         ) : (
-          <MealOverview meal={props.meal} analysis={draft} units={props.units} />
+          <MealOverview meal={props.meal} analysis={draft} units={props.units} hideNutrition={Boolean(working)} />
         )}
 
         {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
 
-        {!editing && !props.creating && <View style={{ marginTop: space.lg, gap: space.sm }}>
-          <PrimaryButton icon="add" label={t('addDish')} disabled={!canAddDish(props.meal) || props.answerSubmitting || answering} onPress={props.onAddDish} />
-          {!canAddDish(props.meal) && <Text style={styles.pendingHelp}>{t('addDishNotReady')}</Text>}
+        {!editing && !props.creating && !working && canAddDish(props.meal) && <View style={styles.mealActions}>
+          <PrimaryButton icon="add" label={t('addDish')} onPress={props.onAddDish} />
         </View>}
         {!editing && <Pressable accessibilityRole="button" onPress={props.onAskAssistant} style={styles.assistantAction}>
           <Ionicons name="chatbubble-outline" size={19} color={color.action} />
-          <Text style={styles.assistantActionText}>{t(draft.clarification ? 'discussInAssistant' : 'askAssistant')}</Text>
+          <Text style={styles.assistantActionText}>{locale === 'ru' ? 'Обсудить еду' : 'Discuss meal'}</Text>
           <Ionicons name="chevron-forward" size={17} color={color.muted} />
         </Pressable>}
         </ScrollView>
@@ -211,7 +219,7 @@ function Header(props: {
   );
 }
 
-function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: NutritionUnits }) {
+function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: NutritionUnits; hideNutrition: boolean }) {
   const weight = mealWeightGrams(props.analysis.items.map((item) => item.quantity));
   const dialog = useAppDialog();
   const { fontScale, width } = useWindowDimensions();
@@ -253,9 +261,7 @@ function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: Nutrit
   return (
     <>
       <View style={styles.detailTicket}>
-        <Text style={styles.mealType}>{t(props.analysis.mealType)} · {formatTime(props.meal.capturedAt)}</Text>
-        <Text style={styles.title}>{props.analysis.title}</Text>
-        <View style={styles.totalRow}>
+        {!props.hideNutrition && props.analysis.items.length > 0 && <View style={styles.totalRow}>
           <Text style={styles.totalCalories}>{formatNumber(displayEnergy(props.analysis.totals.calories, props.units))} {energyUnit(props.units)}</Text>
           <Text style={styles.totalMacros}>
             {weight === null
@@ -265,7 +271,7 @@ function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: Nutrit
           <Text style={styles.totalMacros}>
             {t('proteinShort')} {formatMacro(props.analysis.totals.protein, props.units)} · {t('carbsShort')} {formatMacro(props.analysis.totals.carbs, props.units)} · {t('fatShort')} {formatMacro(props.analysis.totals.fat, props.units)}
           </Text>
-        </View>
+        </View>}
       {props.meal.photos.length > 0 && (
         <ScrollView
           horizontal
@@ -295,14 +301,7 @@ function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: Nutrit
 
       {props.meal.photos.length === 0 && props.analysis.webImage && <MealWebImage key={props.analysis.webImage.url} image={props.analysis.webImage} />}
 
-      {props.meal.note.trim() && (
-        <View style={styles.noteBlock}>
-          <Text style={styles.noteLabel}>{t('yourNote')}</Text>
-          <Text style={styles.noteText}>{props.meal.note.trim()}</Text>
-        </View>
-      )}
-
-        <View style={styles.items}>
+        {!props.hideNutrition && props.analysis.items.length > 0 && <View style={styles.items}>
           {props.analysis.items.map((item, index) => {
             const per100g = caloriesPer100Grams(item.calories, item.quantity);
             return (
@@ -322,7 +321,7 @@ function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: Nutrit
               </View>
             </View>
           ); })}
-        </View>
+        </View>}
       </View>
 
       <Modal animationType="fade" onRequestClose={() => setOpenPhoto(undefined)} transparent visible={Boolean(openPhoto)}>
@@ -508,19 +507,21 @@ const styles = StyleSheet.create({
   mealPhoto: { backgroundColor: color.camera, borderRadius: radius.image, height: 138 },
   photoIndex: { backgroundColor: color.cameraChrome, borderRadius: radius.round, bottom: space.sm, paddingHorizontal: 9, paddingVertical: 5, position: 'absolute', right: space.sm },
   photoIndexText: { color: color.cameraText, fontFamily: type.ticketBold, fontSize: 12 },
-  noteBlock: { backgroundColor: color.actionSoft, borderRadius: 12, marginBottom: space.md, paddingHorizontal: 12, paddingVertical: 2 },
-  noteLabel: { color: color.action, fontFamily: type.ticketBold, fontSize: 13, letterSpacing: 0.5 },
-  noteText: { color: color.ink, fontSize: 15, lineHeight: 21, marginTop: 3 },
+  mealHeading: { gap: space.xs, marginBottom: space.sm },
+  mealActions: { marginTop: space.md },
+  noteBlock: { marginTop: space.sm, gap: space.xs },
+  noteLabel: { color: color.muted, fontSize: 12 },
+  noteText: { color: color.ink, fontSize: 15, lineHeight: 21 },
   photoModal: { backgroundColor: color.camera, flex: 1, padding: space.md },
   fullPhoto: { flex: 1, width: '100%' },
   fullPhotoImage: { height: '100%', width: '100%' },
-  detailTicket: { paddingHorizontal: 4 },
+  detailTicket: { gap: space.sm },
   mealType: { color: color.muted, fontFamily: type.ticket, fontSize: 14 },
-  title: { color: color.ink, fontFamily: type.ticketBold, fontSize: 25, lineHeight: 31, marginTop: 4 },
-  totalRow: { marginTop: 14, marginBottom: 20, paddingBottom: 18, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth },
+  title: { color: color.ink, fontFamily: type.ticketBold, fontSize: 25, lineHeight: 31 },
+  totalRow: { marginTop: space.sm, paddingBottom: space.md, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth },
   totalCalories: { color: color.ink, fontFamily: type.ticketBold, fontSize: 23 },
   totalMacros: { color: color.muted, fontSize: 13, marginTop: 4 },
-  items: { marginTop: 12 },
+  items: { gap: space.xs },
   itemRow: { alignItems: 'flex-start', flexDirection: 'row', gap: space.md, paddingVertical: 13 },
   itemRowCompact: { flexDirection: 'column', gap: space.sm },
   divider: { borderTopColor: color.line, borderTopWidth: 1, borderStyle: 'dashed' },
@@ -531,8 +532,8 @@ const styles = StyleSheet.create({
   itemNutritionCompact: { alignItems: 'flex-start', maxWidth: '100%' },
   itemCalories: { color: color.ink, fontSize: 14, fontWeight: '600' },
   itemMacros: { color: color.muted, flexShrink: 1, fontSize: 11, marginTop: 4, textAlign: 'right' },
-  assistantAction: { alignItems: 'center', borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: space.sm, marginTop: space.lg, minHeight: 52, paddingHorizontal: space.xs },
-  assistantActionText: { color: color.ink, flex: 1, fontFamily: type.ticketBold, fontSize: 17 },
+  assistantAction: { alignItems: 'center', flexDirection: 'row', gap: space.sm, marginTop: space.sm, minHeight: 48 },
+  assistantActionText: { color: color.action, flex: 1, fontSize: 15 },
   editWithAssistant: { alignItems: 'center', backgroundColor: color.actionSoft, borderColor: color.line, borderRadius: radius.surface, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: space.sm, marginBottom: 18, minHeight: 60, padding: space.sm },
   editWithAssistantIcon: { alignItems: 'center', backgroundColor: color.surfacePressed, borderRadius: radius.control, height: 42, justifyContent: 'center', width: 42 },
   editWithAssistantCopy: { flex: 1, minWidth: 0 },

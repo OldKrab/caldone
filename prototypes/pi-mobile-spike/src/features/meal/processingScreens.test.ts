@@ -72,7 +72,7 @@ function nodes(tree: any, type: string): any[] {
       return [];
   return [...(tree.type === type ? [tree] : []), ...nodes(tree.props?.children, type)];
 }
-const meal: any = { id: 'meal', capturedAt: 1, status: 'needs_input', photos: [], analysis: { title: 'Meal', mealType: 'snack', items: [], totals: { calories: 100, protein: 1, carbs: 10, fat: 2 }, clarification: { questions: ['How much?'], impactCalories: 200 } } };
+const meal: any = { id: 'meal', capturedAt: 1, note: 'Lasagna', status: 'needs_input', photos: [], analysis: { title: 'Meal', mealType: 'snack', items: [], totals: { calories: 100, protein: 1, carbs: 10, fat: 2 }, clarification: { questions: ['How much?'], impactCalories: 200 } } };
 const props: any = { meal, units: { energy: 'kcal', weight: 'g' }, onBack() { }, onAnswer: async () => { }, onDelete() { }, onAskAssistant() { }, onSave: async () => { } };
 test('meal question form disappears immediately after submitting and returns on failure', async () => {
   const render = screen('MealDetailScreen');
@@ -100,4 +100,7 @@ test('persisted processing hides stale questions and labels existing estimate un
   const tree = screen('MealDetailScreen')({ ...props, meal: { ...meal, status: 'analyzing' } });
   assert.equal(nodes(tree, 'QuestionAnswers').length, 0);
   assert.equal(nodes(tree, 'MealProgress').length, 1);
+  assert.equal(nodes(tree, 'MealProgress')[0].props.compact, true);
+  assert.equal(nodes(tree, 'Text')[0].props.children, 'Meal');
+  assert.equal(nodes(tree, 'PrimaryButton').length, 0);
 });

@@ -15,7 +15,7 @@ export function mealActivityLabel(stage?: MealActivityStage): string {
 }
 
 /** Reports only observed stages. Elapsed time is not an estimate of completion. */
-export function MealProgress(props: { mealId?: string; stage?: MealActivityStage; previousEstimate?: boolean; label?: string }) {
+export function MealProgress(props: { mealId?: string; stage?: MealActivityStage; previousEstimate?: boolean; label?: string; compact?: boolean }) {
   const [mountedAt] = useState(Date.now);
   const [now, setNow] = useState(Date.now);
   const [details, setDetails] = useState(() => props.mealId ? getMealActivityDetails(props.mealId) : undefined);
@@ -35,11 +35,11 @@ export function MealProgress(props: { mealId?: string; stage?: MealActivityStage
       <Text accessibilityLiveRegion="polite" style={styles.title}>{props.label ?? mealActivityLabel(stage)}</Text>
       <Text accessibilityLabel={`${ru ? 'Прошло' : 'Elapsed'} ${elapsed}`} style={styles.elapsed}>{elapsed}</Text>
     </View>
-    {props.mealId && <Text style={styles.help}>{props.previousEstimate
+    {!props.compact && props.mealId && <Text style={styles.help}>{props.previousEstimate
       ? ru ? 'Пересчёт ещё не завершён. Ниже — предыдущая оценка.' : 'Update in progress. The previous estimate is shown below.'
       : ru ? 'Оценка ещё не готова. Можно продолжать пользоваться приложением.' : 'The estimate is not ready yet. You can continue using the app.'}</Text>}
-    {previous.length > 0 && <Text style={styles.help}>{ru ? 'Предыдущие этапы: ' : 'Previous stages: '}{previous.map(mealActivityLabel).join(' → ')}</Text>}
-    {seconds >= 45 && <Text style={styles.help}>{ru ? 'Обработка занимает больше времени. Ожидаем результат.' : 'Processing is taking longer. Waiting for the result.'}</Text>}
+    {!props.compact && previous.length > 0 && <Text style={styles.help}>{ru ? 'Предыдущие этапы: ' : 'Previous stages: '}{previous.map(mealActivityLabel).join(' → ')}</Text>}
+    {!props.compact && seconds >= 45 && <Text style={styles.help}>{ru ? 'Обработка занимает больше времени. Ожидаем результат.' : 'Processing is taking longer. Waiting for the result.'}</Text>}
   </View>;
 }
 
