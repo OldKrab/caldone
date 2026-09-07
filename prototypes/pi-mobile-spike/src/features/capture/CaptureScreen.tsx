@@ -114,8 +114,8 @@ export function CaptureScreen(props: {
         <View style={styles.permissionIcon}>
           <Ionicons name="camera-outline" size={30} color={color.ink} />
         </View>
-        <Text style={styles.permissionTitle}>{t('cameraPermissionTitle')}</Text>
-        <Text style={styles.permissionBody}>{t('cameraPermissionBody')}</Text>
+        <Text selectable style={styles.permissionTitle}>{t('cameraPermissionTitle')}</Text>
+        <Text selectable style={styles.permissionBody}>{t('cameraPermissionBody')}</Text>
         <Pressable
           accessibilityRole="button"
           onPress={requestPermission}
@@ -164,7 +164,7 @@ export function CaptureScreen(props: {
       <SafeAreaView style={styles.chrome} pointerEvents="box-none">
         <View style={styles.topBar}>
           <IconButton icon="close" label={t('close')} inverted onPress={props.onCancel} />
-          <Text style={styles.cameraTitle}>{props.photos.length > 0 ? t('addPhoto') : t('addMeal')}</Text>
+          <Text selectable style={styles.cameraTitle}>{props.photos.length > 0 ? t('addPhoto') : t('addMeal')}</Text>
           <IconButton
             icon={flash === 'on' ? 'flash' : 'flash-off'}
             label={flash === 'on' ? t('flashOn') : t('flashOff')}
@@ -215,7 +215,7 @@ export function CaptureScreen(props: {
               <Ionicons name="create-outline" size={23} color={color.cameraText} />
             </Pressable>
           )}
-          {(error || props.error) && <Text style={styles.error}>{error || props.error}</Text>}
+          {(error || props.error) && <Text selectable style={styles.error}>{error || props.error}</Text>}
         </View>
         </View>
       </SafeAreaView>

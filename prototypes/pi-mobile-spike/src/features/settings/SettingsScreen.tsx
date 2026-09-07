@@ -143,7 +143,7 @@ function SettingsHeader(props: { title: string; onBack: () => void }) {
   return (
     <View style={styles.header}>
       <IconButton icon="arrow-back" label={t('back')} onPress={props.onBack} />
-      <Text adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={1} style={styles.headerTitle}>{props.title}</Text>
+      <Text selectable adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={1} style={styles.headerTitle}>{props.title}</Text>
       <View style={styles.headerSpacer} />
     </View>
   );
@@ -152,7 +152,7 @@ function SettingsHeader(props: { title: string; onBack: () => void }) {
 function SettingsSection(props: { title: string; children: React.ReactNode }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionLabel}>{props.title}</Text>
+      <Text selectable style={styles.sectionLabel}>{props.title}</Text>
       <View style={styles.panel}>{props.children}</View>
     </View>
   );
@@ -203,11 +203,11 @@ function GoalsPage(props: { goals: DailyGoals; saving: boolean; onBack: () => vo
   return (
     <ScrollView contentContainerStyle={styles.content} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.scroll}>
       <SettingsHeader title={t('dailyGoals')} onBack={props.onBack} />
-      <Text style={styles.pageIntro}>{t('goalsQuietHelp')}</Text>
+      <Text selectable style={styles.pageIntro}>{t('goalsQuietHelp')}</Text>
       <View style={styles.formPanel}>
         {fields.map((field) => (
           <View key={field.key} style={styles.settingRow}>
-            <Text style={styles.settingLabel}>{field.label}</Text>
+            <Text selectable style={styles.settingLabel}>{field.label}</Text>
             <View style={styles.numberInput}>
               <TextInput
                 accessibilityLabel={field.label}
@@ -217,7 +217,7 @@ function GoalsPage(props: { goals: DailyGoals; saving: boolean; onBack: () => vo
                 style={styles.numberInputText}
                 value={values[field.key]}
               />
-              <Text style={styles.numberUnit}>{field.unit}</Text>
+              <Text selectable style={styles.numberUnit}>{field.unit}</Text>
             </View>
           </View>
         ))}
@@ -230,7 +230,7 @@ function GoalsPage(props: { goals: DailyGoals; saving: boolean; onBack: () => vo
         </View>
         <Ionicons name="chevron-forward" size={18} color={color.muted} />
       </Pressable>
-      {error && <Text accessibilityRole="alert" style={styles.error}>{t('goalsError')}</Text>}
+      {error && <Text selectable accessibilityRole="alert" style={styles.error}>{t('goalsError')}</Text>}
       <View style={styles.primaryArea}><PrimaryButton busy={props.saving} label={t('save')} onPress={save} /></View>
     </ScrollView>
   );
@@ -243,7 +243,7 @@ function UnitsPage(props: { units: NutritionUnits; onBack: () => void; onSave: (
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <SettingsHeader title={t('nutritionUnits')} onBack={props.onBack} />
-      <Text style={styles.pageIntro}>{t('unitsHelp')}</Text>
+      <Text selectable style={styles.pageIntro}>{t('unitsHelp')}</Text>
       <ChoiceSection title={t('energy')} options={[['kcal', t('kcal')], ['kj', t('kilojoules')]]} selected={props.units.energy} onSelect={(value) => void choose('energy', value as NutritionUnits['energy'])} />
       <ChoiceSection title={t('portionWeight')} options={[['g', t('gramsLong')], ['oz', t('ounces')]]} selected={props.units.weight} onSelect={(value) => void choose('weight', value as NutritionUnits['weight'])} />
     </ScrollView>
@@ -253,7 +253,7 @@ function UnitsPage(props: { units: NutritionUnits; onBack: () => void; onSave: (
 function ChoiceSection(props: { title: string; options: Array<[string, string]>; selected: string; onSelect: (value: string) => void }) {
   return (
     <View style={styles.choiceSection}>
-      <Text style={styles.sectionLabel}>{props.title}</Text>
+      <Text selectable style={styles.sectionLabel}>{props.title}</Text>
       <View style={styles.choiceControl}>
         {props.options.map(([value, label]) => (
           <Pressable key={value} accessibilityRole="radio" accessibilityState={{ checked: props.selected === value }} onPress={() => props.onSelect(value)} style={[styles.choiceButton, props.selected === value && styles.choiceButtonSelected]}>
@@ -278,7 +278,7 @@ function NotificationsPage(props: { preferences: NotificationPreferences; onBack
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <SettingsHeader title={t('notifications')} onBack={props.onBack} />
-      <Text style={styles.pageIntro}>{t('notificationHelp')}</Text>
+      <Text selectable style={styles.pageIntro}>{t('notificationHelp')}</Text>
       <View style={styles.formPanel}>
         {rows.map((row) => <ToggleRow key={row.key} label={row.label} help={row.help} value={props.preferences[row.key]} onChange={(value) => void toggle(row.key, value)} />)}
       </View>
@@ -289,7 +289,7 @@ function NotificationsPage(props: { preferences: NotificationPreferences; onBack
 function ToggleRow(props: { label: string; help?: string; value: boolean; onChange: (value: boolean) => void }) {
   return (
     <View style={styles.toggleRow}>
-      <View style={styles.toggleCopy}><Text style={styles.settingLabel}>{props.label}</Text>{props.help ? <Text style={styles.toggleHelp}>{props.help}</Text> : null}</View>
+      <View style={styles.toggleCopy}><Text selectable style={styles.settingLabel}>{props.label}</Text>{props.help ? <Text selectable style={styles.toggleHelp}>{props.help}</Text> : null}</View>
       <Switch accessibilityLabel={props.label} onValueChange={props.onChange} thumbColor={color.surface} trackColor={{ false: color.line, true: color.action }} value={props.value} />
     </View>
   );
@@ -323,13 +323,13 @@ function PrivacyPage(props: { locale: string; includePhotos: boolean; importing:
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <SettingsHeader title={t('dataPrivacy')} onBack={props.onBack} />
-      <Text style={styles.pageIntro}>{t('privacyHelp')}</Text>
+      <Text selectable style={styles.pageIntro}>{t('privacyHelp')}</Text>
       <View style={styles.formPanel}><ToggleRow label={t('includePhotosInExport')} value={props.includePhotos} onChange={(value) => void props.onIncludePhotos(value)} /></View>
       <View style={styles.actionList}>
         <Pressable disabled={props.importing} onPress={() => void props.onImport()} style={[styles.textAction, props.importing && styles.disabled]}><Text style={styles.textActionLabel}>{t(props.importing ? 'importingData' : 'importMyData')}</Text></Pressable>
         <Pressable onPress={() => void props.onExport()} style={styles.textAction}><Text style={styles.textActionLabel}>{t('exportMyData')}</Text></Pressable>
         <Pressable accessibilityRole="button" onPress={props.onRecordNextAnalysis} style={styles.textAction}><Text style={styles.textActionLabel}>{props.locale === 'ru' ? 'Записать следующий анализ с фото' : 'Capture next analysis with photo'}</Text></Pressable>
-        <Text style={styles.pageIntro}>{props.locale === 'ru' ? 'Тестовая диагностика содержит фото и ответ модели. Хранится только последняя запись.' : 'Test diagnostics include the photo and model response. Only the latest capture is kept.'}</Text>
+        <Text selectable style={styles.pageIntro}>{props.locale === 'ru' ? 'Тестовая диагностика содержит фото и ответ модели. Хранится только последняя запись.' : 'Test diagnostics include the photo and model response. Only the latest capture is kept.'}</Text>
         <Pressable accessibilityRole="button" onPress={props.onClearTestCapture} style={styles.textAction}><Text style={styles.textActionLabel}>{props.locale === 'ru' ? 'Удалить тестовую запись' : 'Delete test capture'}</Text></Pressable>
         <Pressable onPress={() => void props.onExportDiagnostics()} style={styles.textAction}><Text style={styles.textActionLabel}>{t('saveDiagnostics')}</Text></Pressable>
         <Pressable onPress={() => confirmRemoval('photos')} style={styles.textAction}><Text style={styles.textActionLabel}>{t('removeAllPhotos')}</Text></Pressable>
@@ -344,8 +344,8 @@ function AboutPage(props: { onBack: () => void }) {
     <ScrollView contentContainerStyle={styles.content}>
       <SettingsHeader title={t('aboutCaldone')} onBack={props.onBack} />
       <Image source={require('../../../assets/caldone-fork-icon.png')} style={styles.aboutMark} />
-      <Text style={styles.aboutTitle}>CalDone</Text>
-      <Text style={styles.aboutCopy}>{t('aboutBody')}</Text>
+      <Text selectable style={styles.aboutTitle}>CalDone</Text>
+      <Text selectable style={styles.aboutCopy}>{t('aboutBody')}</Text>
       <View style={styles.formPanel}>
         <InfoRow label={t('version')} value={appConfig.expo.version} />
         <InfoRow label={t('openSource')} value="CalDone" />
@@ -356,7 +356,7 @@ function AboutPage(props: { onBack: () => void }) {
 }
 
 function InfoRow(props: { label: string; value: string }) {
-  return <View style={styles.infoRow}><Text style={styles.linkValue}>{props.label}</Text><Text style={styles.settingLabel}>{props.value}</Text></View>;
+  return <View style={styles.infoRow}><Text selectable style={styles.linkValue}>{props.label}</Text><Text selectable style={styles.settingLabel}>{props.value}</Text></View>;
 }
 
 const styles = StyleSheet.create({

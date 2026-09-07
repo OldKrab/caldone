@@ -129,14 +129,14 @@ export function SetupScreen(props: {
           >
             <View style={styles.brandRow}>
               <Image source={require('../../../assets/caldone-fork-icon.png')} style={{ width: 36, height: 36, borderRadius: 10 }} />
-              <Text style={styles.brand}>CalDone</Text>
+              <Text selectable style={styles.brand}>CalDone</Text>
             </View>
-            <Text style={styles.welcomeTitle}>
+            <Text selectable style={styles.welcomeTitle}>
               {ru
                 ? 'Еда — часть дня.\nНе целая работа.'
                 : 'Food is part of your day.\nNot another job.'}
             </Text>
-            <Text style={styles.welcomeBody}>
+            <Text selectable style={styles.welcomeBody}>
               {ru
                 ? 'Снимок, понятная оценка и дневник, который легко вести.'
                 : 'A photo, a clear estimate, and a journal that’s easy to keep.'}
@@ -168,13 +168,13 @@ export function SetupScreen(props: {
                     <Ionicons name={icon} size={23} color={color.action} />
                   </View>
                   <View style={styles.journeyCopy}>
-                    <Text style={styles.journeyTitle}>{title}</Text>
-                    <Text style={styles.journeyBody}>{body}</Text>
+                    <Text selectable style={styles.journeyTitle}>{title}</Text>
+                    <Text selectable style={styles.journeyBody}>{body}</Text>
                   </View>
                 </View>
               ))}
             </View>
-            <Text style={styles.welcomeNote}>
+            <Text selectable style={styles.welcomeNote}>
               {ru
                 ? 'Сначала зададим ориентиры и подключим ИИ для анализа. Цели можно изменить позже.'
                 : 'First, set your starting goals and connect AI for analysis. You can change your goals later.'}
@@ -236,7 +236,7 @@ export function SetupScreen(props: {
           >
             <View style={styles.topline}>
               <IconButton icon="arrow-back" label={t('back')} onPress={goBack} />
-              <Text style={styles.stepLabel}>
+              <Text selectable style={styles.stepLabel}>
                 {t('setupStep', { current: step + 1, total: totalSteps })}
               </Text>
               <View style={styles.backSpacer} />
@@ -257,8 +257,8 @@ export function SetupScreen(props: {
                 color={color.action}
               />
             </View>
-            <Text style={[styles.title, compact && styles.titleCompact]}>{titles[step]}</Text>
-            <Text style={styles.body}>{bodies[step]}</Text>
+            <Text selectable style={[styles.title, compact && styles.titleCompact]}>{titles[step]}</Text>
+            <Text selectable style={styles.body}>{bodies[step]}</Text>
 
             {step === 0 && (
               <ChoiceStack
@@ -320,7 +320,7 @@ export function SetupScreen(props: {
                     onChange={(weightKg) => setValues((current) => ({ ...current, weightKg }))}
                   />
                 </View>
-                <Text style={styles.scopeNote}>{t('adultEstimateNote')}</Text>
+                <Text selectable style={styles.scopeNote}>{t('adultEstimateNote')}</Text>
               </>
             )}
 
@@ -376,7 +376,7 @@ export function SetupScreen(props: {
               </View>
             )}
             {error ? (
-              <Text accessibilityRole="alert" style={styles.error}>
+              <Text selectable accessibilityRole="alert" style={styles.error}>
                 {error}
               </Text>
             ) : null}
@@ -424,7 +424,7 @@ function NumberField(props: {
 }) {
   return (
     <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{props.label}</Text>
+      <Text selectable style={styles.fieldLabel}>{props.label}</Text>
       <View style={styles.inputRow}>
         <TextInput
           accessibilityLabel={props.label}
@@ -434,7 +434,7 @@ function NumberField(props: {
           style={styles.input}
           value={props.value}
         />
-        <Text style={styles.suffix}>{props.suffix}</Text>
+        <Text selectable style={styles.suffix}>{props.suffix}</Text>
       </View>
     </View>
   );

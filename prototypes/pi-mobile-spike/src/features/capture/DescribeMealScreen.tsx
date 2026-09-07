@@ -20,12 +20,12 @@ export function DescribeMealScreen(props: {
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.header}>
         <IconButton icon="close" label={t('close')} disabled={props.sending} onPress={props.onCancel} />
-        <Text style={styles.title}>{t(props.addingDish ? 'addDish' : 'describeMeal')}</Text>
+        <Text selectable style={styles.title}>{t(props.addingDish ? 'addDish' : 'describeMeal')}</Text>
         <View style={{ width: 44 }} />
       </View>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-        <Text style={styles.help}>{t(props.addingDish ? 'addDishHelp' : 'describeMealHelp')}</Text>
-        <Text style={styles.label}>{t('mealDescription')}</Text>
+        <Text selectable style={styles.help}>{t(props.addingDish ? 'addDishHelp' : 'describeMealHelp')}</Text>
+        <Text selectable style={styles.label}>{t('mealDescription')}</Text>
         <TextInput
           autoFocus multiline textAlignVertical="top"
           accessibilityLabel={t('mealDescription')}
@@ -33,9 +33,9 @@ export function DescribeMealScreen(props: {
           placeholder={t('mealDescriptionExample')} placeholderTextColor={color.muted}
           style={styles.input}
         />
-        <Text style={styles.hint}>{t('describeMealHint')}</Text>
-        {props.error && <Text accessibilityRole="alert" style={styles.error}>{props.error}</Text>}
-        {props.addingDish && props.sending && <Text accessibilityLiveRegion="polite" style={styles.hint}>{t('addingDish')}</Text>}
+        <Text selectable style={styles.hint}>{t('describeMealHint')}</Text>
+        {props.error && <Text selectable accessibilityRole="alert" style={styles.error}>{props.error}</Text>}
+        {props.addingDish && props.sending && <Text selectable accessibilityLiveRegion="polite" style={styles.hint}>{t('addingDish')}</Text>}
         {props.addingDish && props.sending && <Pressable accessibilityRole="button" onPress={props.onStop} style={{ minHeight: 48, justifyContent: 'center' }}><Text style={{ color: color.action, textAlign: 'center' }}>{t('stop')}</Text></Pressable>}
         <PrimaryButton label={t(props.addingDish ? 'addDish' : 'analyzeMeal')} busy={props.sending} disabled={!hasMealInput({ photos: [], note: props.note })} onPress={props.onSend} />
         {props.onManual && <Pressable accessibilityRole="button" disabled={props.sending} onPress={props.onManual} style={({ pressed }) => ({ minHeight: 48, justifyContent: 'center', opacity: props.sending ? 0.4 : pressed ? 0.7 : 1 })}>
