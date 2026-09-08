@@ -1,7 +1,7 @@
 const copy = {
   en: {
     per100g: 'per 100 g', per100gUnknown: 'Per 100 g: mass needed',
-    saveDiagnostics: 'Save diagnostics', diagnosticsSaved: 'Diagnostics saved',
+    saveDiagnostics: 'Save logs', diagnosticsSaved: 'Logs saved',
     zoomIn: 'Zoom in', zoomOut: 'Zoom out',
     addDish: 'Add dish',
     addDishHelp: 'Include only the new food. It will be added to the same meal.',
@@ -108,7 +108,7 @@ const copy = {
     importCompleteTitle: 'Import complete', importCompleteBody: 'Added {{meals}} meals, {{conversations}} conversations, and {{photos}} photos. Skipped {{skipped}} existing records.',
     importFailedTitle: 'Could not import data', importFailedBody: 'Choose a valid CalDone JSON export and try again.', importTooLarge: 'This backup is too large to import safely on this device.',
     exportFailedTitle: 'Could not create export', exportFailedBody: 'Please try again.',
-    diagnosticsExportFailedBody: 'Diagnostics could not be prepared. Please try again.',
+    diagnosticsExportFailedBody: 'Logs could not be prepared. Please try again.',
     removeAllPhotos: 'Remove all saved photos', deleteAllMealData: 'Delete all app data',
     confirmRemovePhotos: 'Remove photos from every meal?', confirmDeleteData: 'Delete every meal, photo, conversation, and assistant action?',
     aboutBody: 'A quiet calorie tracker for people who do not want tracking to become another job.',
@@ -116,7 +116,7 @@ const copy = {
   },
   ru: {
     per100g: 'на 100 г', per100gUnknown: 'На 100 г: нужна масса',
-    saveDiagnostics: 'Сохранить диагностику', diagnosticsSaved: 'Диагностика сохранена',
+    saveDiagnostics: 'Сохранить логи', diagnosticsSaved: 'Логи сохранены',
     zoomIn: 'Приблизить', zoomOut: 'Отдалить',
     addDish: 'Добавить блюдо',
     addDishHelp: 'Укажите только новую еду. Она добавится к этому же приёму пищи.',
@@ -228,7 +228,7 @@ const copy = {
     importCompleteTitle: 'Импорт завершён', importCompleteBody: 'Добавлено: {{meals}} приёмов пищи, {{conversations}} разговоров и {{photos}} фото. Уже существовало: {{skipped}}.',
     importFailedTitle: 'Не удалось импортировать данные', importFailedBody: 'Выберите корректный JSON-экспорт CalDone и попробуйте снова.', importTooLarge: 'Эта резервная копия слишком велика для безопасного импорта на устройстве.',
     exportFailedTitle: 'Не удалось создать экспорт', exportFailedBody: 'Попробуйте ещё раз.',
-    diagnosticsExportFailedBody: 'Не удалось подготовить диагностику. Попробуйте ещё раз.',
+    diagnosticsExportFailedBody: 'Не удалось подготовить логи. Попробуйте ещё раз.',
     removeAllPhotos: 'Удалить все сохранённые фото', deleteAllMealData: 'Удалить все данные приложения',
     confirmRemovePhotos: 'Удалить фотографии из всех приёмов пищи?', confirmDeleteData: 'Удалить всю еду, фотографии, разговоры и действия ассистента?',
     aboutBody: 'Спокойный счётчик калорий для тех, кто не хочет превращать учёт еды в отдельную работу.',

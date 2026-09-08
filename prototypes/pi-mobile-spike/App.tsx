@@ -665,22 +665,6 @@ function CalDoneApp() {
     }
   };
 
-  const recordNextAnalysis = () => {
-    try {
-      mealRequestDiagnostics.arm();
-      showInfo(locale === 'ru' ? 'Запись теста включена' : 'Test capture enabled', locale === 'ru'
-        ? 'Добавьте одно блюдо с фото и дождитесь результата. Затем сохраните диагностику здесь. Она будет содержать фото, запрос и ответ модели. Повторное включение заменяет предыдущую запись.'
-        : 'Add one meal with a photo and wait for the result, then save diagnostics here. The export will include the photo, request and model response. Arming again replaces the previous capture.');
-    } catch { showInfo(t('exportFailedTitle'), t('diagnosticsExportFailedBody')); }
-  };
-
-  const clearTestCapture = () => {
-    try {
-      mealRequestDiagnostics.clear();
-      showInfo(locale === 'ru' ? 'Тестовая запись удалена' : 'Test capture deleted', locale === 'ru' ? 'Запись следующего запроса отключена.' : 'Capture of the next request is disabled.');
-    } catch { showInfo(t('exportFailedTitle'), t('diagnosticsExportFailedBody')); }
-  };
-
   const exportDiagnostics = async () => {
     try {
       const provider = await getSelectedProvider();
@@ -860,8 +844,6 @@ function CalDoneApp() {
         onExport={exportData}
         onImport={importData}
         onExportDiagnostics={exportDiagnostics}
-        onRecordNextAnalysis={recordNextAnalysis}
-        onClearTestCapture={clearTestCapture}
         onIncludePhotosInExport={persistExportPhotos}
         onManageProvider={() => setScreen('providers')}
         onRemoveAllPhotos={removeSavedPhotos}

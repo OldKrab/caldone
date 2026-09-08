@@ -46,8 +46,6 @@ export function SettingsScreen(props: {
   onExport: () => Promise<void>;
   onImport: () => Promise<void>;
   onExportDiagnostics: () => Promise<void>;
-  onRecordNextAnalysis: () => void;
-  onClearTestCapture: () => void;
   onRemoveAllPhotos: () => Promise<void>;
   onDeleteAllMeals: () => Promise<void>;
 }) {
@@ -94,14 +92,11 @@ export function SettingsScreen(props: {
           <LanguagePage locale={props.locale} onBack={goBack} onSave={props.onChangeLocale} />
         ) : page === 'privacy' ? (
           <PrivacyPage
-            locale={props.locale}
             includePhotos={props.includePhotosInExport}
             onBack={goBack}
             onDeleteAllMeals={props.onDeleteAllMeals}
             onExport={props.onExport}
             onExportDiagnostics={props.onExportDiagnostics}
-            onRecordNextAnalysis={props.onRecordNextAnalysis}
-            onClearTestCapture={props.onClearTestCapture}
             onImport={props.onImport}
             importing={props.importingData}
             onIncludePhotos={props.onIncludePhotosInExport}
@@ -310,7 +305,7 @@ function LanguagePage(props: { locale: Locale; onBack: () => void; onSave: (loca
   );
 }
 
-function PrivacyPage(props: { locale: string; includePhotos: boolean; importing: boolean; onBack: () => void; onIncludePhotos: (include: boolean) => Promise<void>; onExport: () => Promise<void>; onImport: () => Promise<void>; onExportDiagnostics: () => Promise<void>; onRecordNextAnalysis: () => void; onClearTestCapture: () => void; onRemoveAllPhotos: () => Promise<void>; onDeleteAllMeals: () => Promise<void> }) {
+function PrivacyPage(props: { includePhotos: boolean; importing: boolean; onBack: () => void; onIncludePhotos: (include: boolean) => Promise<void>; onExport: () => Promise<void>; onImport: () => Promise<void>; onExportDiagnostics: () => Promise<void>; onRemoveAllPhotos: () => Promise<void>; onDeleteAllMeals: () => Promise<void> }) {
   const dialog = useAppDialog();
   const confirmRemoval = (kind: 'photos' | 'data') => dialog.show({
     title: t(kind === 'photos' ? 'removeAllPhotos' : 'deleteAllMealData'),
@@ -328,9 +323,6 @@ function PrivacyPage(props: { locale: string; includePhotos: boolean; importing:
       <View style={styles.actionList}>
         <Pressable disabled={props.importing} onPress={() => void props.onImport()} style={[styles.textAction, props.importing && styles.disabled]}><Text style={styles.textActionLabel}>{t(props.importing ? 'importingData' : 'importMyData')}</Text></Pressable>
         <Pressable onPress={() => void props.onExport()} style={styles.textAction}><Text style={styles.textActionLabel}>{t('exportMyData')}</Text></Pressable>
-        <Pressable accessibilityRole="button" onPress={props.onRecordNextAnalysis} style={styles.textAction}><Text style={styles.textActionLabel}>{props.locale === 'ru' ? 'Записать следующий анализ с фото' : 'Capture next analysis with photo'}</Text></Pressable>
-        <Text selectable style={styles.pageIntro}>{props.locale === 'ru' ? 'Тестовая диагностика содержит фото и ответ модели. Хранится только последняя запись.' : 'Test diagnostics include the photo and model response. Only the latest capture is kept.'}</Text>
-        <Pressable accessibilityRole="button" onPress={props.onClearTestCapture} style={styles.textAction}><Text style={styles.textActionLabel}>{props.locale === 'ru' ? 'Удалить тестовую запись' : 'Delete test capture'}</Text></Pressable>
         <Pressable onPress={() => void props.onExportDiagnostics()} style={styles.textAction}><Text style={styles.textActionLabel}>{t('saveDiagnostics')}</Text></Pressable>
         <Pressable onPress={() => confirmRemoval('photos')} style={styles.textAction}><Text style={styles.textActionLabel}>{t('removeAllPhotos')}</Text></Pressable>
         <Pressable onPress={() => confirmRemoval('data')} style={styles.textAction}><Text style={styles.dangerLabel}>{t('deleteAllMealData')}</Text></Pressable>
