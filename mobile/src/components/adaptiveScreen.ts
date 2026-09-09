@@ -32,7 +32,10 @@ export function overlayKeyboardBehavior(platform: string): 'padding' | undefined
   return platform === 'android' || platform === 'ios' ? 'padding' : undefined;
 }
 
-/** Android IME coordinates omit the bottom system area on edge-to-edge windows. */
-export function overlayKeyboardOffset(platform: string, safeAreaBottom: number): number {
-  return platform === 'android' ? safeAreaBottom : 0;
+/** The IME reports screen coordinates, while the avoiding view's frame starts
+ * below its parent's top safe-area padding. Bottom navigation is unrelated to
+ * that origin and differs between gesture and three-button navigation.
+ */
+export function overlayKeyboardOffset(platform: string, safeAreaTop: number): number {
+  return platform === 'android' ? safeAreaTop : 0;
 }

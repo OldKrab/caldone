@@ -40,3 +40,20 @@ The native `android/` directory, dependencies, Metro/Expo caches, and build outp
 For branch names, commits, release-note language, and public evidence, follow [contribution guidance](../CONTRIBUTING.md). Local build scripts write APKs to the ignored root `artifacts/` directory.
 
 The Android app requires native modules for authentication, background processing, and its widget.
+
+## Assistant keyboard regression
+
+On a running Android build, open a meal → Discuss meal, focus the message field,
+and type a short or multiline draft without sending it. Once the keyboard settles:
+
+```sh
+cd mobile
+node scripts/check-assistant-keyboard.mjs ../artifacts/assistant-keyboard
+```
+
+The check compares the native input and Send touch targets with Android's IME
+frame, fails if either is covered, and saves a screenshot, hierarchy and measurements.
+Use `ADB` or `ANDROID_HOME` to locate adb and `ANDROID_SERIAL` to select a device.
+Run with the app in English or Russian, in both gesture and three-button navigation,
+at normal and enlarged font sizes. Also dismiss the keyboard and verify that the
+composer returns above the app navigation. Keep evidence in ignored `artifacts/`.
