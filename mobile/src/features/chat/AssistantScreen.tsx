@@ -287,7 +287,7 @@ export function AssistantScreen(props: {
       <ScreenReveal>
         <KeyboardAvoidingView
           behavior={keyboardAvoidingBehavior(Platform.OS)}
-          keyboardVerticalOffset={keyboardAvoidingOffset(Platform.OS, safeAreaInsets.bottom)}
+          keyboardVerticalOffset={keyboardAvoidingOffset(Platform.OS, safeAreaInsets.top)}
           style={styles.screen}
         >
           <View style={styles.header}>

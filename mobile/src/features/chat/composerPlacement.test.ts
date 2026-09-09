@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { composerBottomSpace, keyboardAvoidingBehavior, keyboardAvoidingOffset, keyboardOccupiesWindow } from './composerPlacement.ts';
+import { composerBottomSpace, keyboardAvoidingBehavior, keyboardOccupiesWindow } from './composerPlacement.ts';
 
 test('composer reserves app navigation only while the keyboard is hidden', () => {
   assert.equal(composerBottomSpace(false, 84), 84);
@@ -17,15 +17,5 @@ test('Android explicitly avoids an overlay keyboard when edge-to-edge keeps the 
   assert.equal(keyboardAvoidingBehavior('android'), 'padding');
 });
 
-test('Android includes the bottom system inset when the IME height excludes it', () => {
-  const trace = {
-    composerBottom: 458.3333435058594 + 74.66665649414062,
-    keyboardTop: 493,
-    safeAreaBottom: 44,
-  };
-
-  const correctedComposerBottom = trace.composerBottom - keyboardAvoidingOffset('android', trace.safeAreaBottom);
-
-  assert.ok(correctedComposerBottom <= trace.keyboardTop);
-  assert.equal(keyboardAvoidingOffset('ios', trace.safeAreaBottom), 0);
-});
+// Native frame placement is checked by scripts/check-assistant-keyboard.mjs.
+// A helper-only calculation cannot catch the screen passing the wrong inset.
