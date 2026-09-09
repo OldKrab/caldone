@@ -52,3 +52,22 @@ test('unknown portions and refusal to answer end clarification in every meal pat
     assert.match(prompt,/explicitly approximate/);
   }
 });
+
+test('recognition treats disputed names and echoed questions as hypotheses, not label evidence', () => {
+  for (const build of [buildMealAnalysisPrompt, buildMealRefinementPrompt]) {
+    const prompt = build('English');
+    assert.match(prompt, /Only quote packaging text you can actually read in the attached photos/);
+    assert.match(prompt, /If the user disputes.*re-examine the attached photos/);
+    assert.match(prompt, /Repeated question wording is not user confirmation/);
+  }
+});
+
+
+test('history photos remain references and never become additional current food', () => {
+  for (const addingDish of [false, true]) {
+    const prompt = buildMealAnalysisPrompt('English', addingDish);
+    assert.doesNotMatch(prompt, /All (supplied|attached) photos/);
+    assert.match(prompt, /Photos in conversation history and tool results belong to the meals identified there/);
+    assert.match(prompt, /do not add their food or portions to the current meal/);
+  }
+});

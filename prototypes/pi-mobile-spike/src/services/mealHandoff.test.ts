@@ -17,7 +17,7 @@ const sources:Record<string,string>={
     export const refineMealAnalysis=async input=>{const f=globalThis.__mealHandoff;f.input=input;
       if(f.fail)throw Error('search could not be verified');
       return {text:JSON.stringify({...f.meal.analysis,clarification:{questions:['Which variant?'],impactCalories:150},research:{status:'completed',sources:[{url:'https://invented.test'}]}}),research:{status:'completed',sources:[{url:'https://source.test/product',title:'Product'}]}}};`,
-  '../data/chatRepository':`export const getChatToolReceipt=async()=>undefined;export const saveChatToolReceipt=async()=>{};
+  '../data/chatRepository':`export const loadMealChatMessages=async()=>[];export const getChatToolReceipt=async()=>undefined;export const saveChatToolReceipt=async()=>{};
     export const recordChatAction=async action=>({...action,id:'a'});export const appendInlineMealAnswer=async()=>{};
     export const ensureClarificationThread=async()=>({id:'clarification-thread'});
     export const syncMealQuestionsToThread=async(threadId,mealId,questions)=>{globalThis.__mealHandoff.questions.push({threadId,questions})};`,

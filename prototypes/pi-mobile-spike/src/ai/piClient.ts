@@ -8,7 +8,7 @@ import { explicitlyRequestsSearch, type MealResearch } from '../domain/mealResea
 import { requestWithDeadline } from '../services/requestDeadline';
 import { mealInputContent } from './mealInput';
 import { AppState } from 'react-native';
-import { retryConnection } from '../services/connectionRecovery';
+import { continuationMessages, isConnectionError } from '../services/connectionRecovery';
 import { waitForConnectionRecovery } from '../services/foregroundRecovery';
 import {
   contentText,
@@ -30,6 +30,7 @@ import { fetch as expoFetch } from 'expo/fetch';
 import { File } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 
+import { buildChatPrompt } from './chatPrompt';
 import { buildMealClarificationContent } from './mealClarificationContent';
 import { installPiMobileRuntime } from './mobileRuntime';
 import {
@@ -44,6 +45,7 @@ import { fetchWithProviderActivity, type ProviderToolActivity } from './provider
 import { SecureCredentialStore } from './secureCredentialStore';
 import { appendDiagnosticEvent, type AiDiagnosticEvent } from '../data/mealRepository';
 import type { ChatMealQuestionMessage, ChatUserMessage } from '../domain/chat';
+import { completedChatContext } from '../domain/chat';
 import { webSearchPreference } from './providerPreferences';
 
 const PROVIDER_ID = 'openai-codex';
@@ -221,7 +223,7 @@ async function recordAiDiagnostic(input: {
   mealId: string;
   model: Model<string>;
   startedAt: number;
-  response?: AssistantMessage;
+  response?: AssistantMessage & { executedTools?: string[] };
   error?: unknown;
   research?: MealResearch;
 }): Promise<void> {
@@ -231,7 +233,7 @@ async function recordAiDiagnostic(input: {
     getWebSearchEnabled(input.model.provider),
   ]);
   const response = input.response;
-  const toolNames = response?.content.flatMap((block) => block.type === 'toolCall' ? [block.name] : []) ?? [];
+  const toolNames = response?.executedTools ?? response?.content.flatMap((block) => block.type === 'toolCall' ? [block.name] : []) ?? [];
   const outputText = response ? contentText(response.content) : undefined;
   await appendDiagnosticEvent({
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`,
@@ -332,7 +334,7 @@ export async function createChatAgent(input: {
     model.reasoning ? getThinkingLevel(model.provider, selectedModelId) : undefined,
     hostedToolOptions(model),
   ]);
-  return new Agent({
+  return createRuntimeAgent({
     initialState: {
       systemPrompt: input.systemPrompt,
       messages: input.messages,
@@ -341,9 +343,6 @@ export async function createChatAgent(input: {
       tools: input.tools,
     },
     sessionId: input.sessionId,
-    toolExecution: 'sequential',
-    transport: 'sse',
-    convertToLlm: convertChatMessages,
     onPayload: toolOptions.onPayload,
     streamFn: (activeModel, context, options) => models.streamSimple(activeModel, context, {
       ...options,
@@ -353,6 +352,14 @@ export async function createChatAgent(input: {
       transport: 'sse',
     }),
   });
+}
+
+/** Chat and meal analysis share provider conversion, validated sequential tools
+ * and Pi's conversation loop. Callers own persistence and their result format. */
+function createRuntimeAgent(options: ConstructorParameters<typeof Agent>[0]): Agent {
+  const model = options.initialState?.model;
+  if (!model || !TOOL_CAPABLE_APIS.has(model.api)) throw new Error('The selected model does not expose a supported tool-calling API');
+  return new Agent({ ...options, toolExecution: 'sequential', transport: 'sse', convertToLlm: convertChatMessages });
 }
 
 async function convertChatMessages(messages: AgentMessage[]): Promise<Message[]> {
@@ -442,6 +449,7 @@ export type ImageInput = {
 export type MealModelActivity = 'thinking' | 'web_search' | 'writing_result';
 
 async function completeMealRequest(
+  execution: { mealId: string; language: 'English' | 'Russian'; conversation?: AgentMessage[] },
   model: Model<string>,
   context: Context,
   options: ModelsSimpleStreamOptions,
@@ -449,38 +457,107 @@ async function completeMealRequest(
   requireSearch = false,
   capture?: MealRequestCapture,
   seekImage = false,
-): Promise<AssistantMessage & { research: MealResearch }> {
-  return retryConnection(() => requestWithDeadline(async signal => {
-    let answerStarted = false;
-    const baseFetch = options.fetch ?? expoFetch as typeof globalThis.fetch;
-    const requestFetch = capture ? capture.wrapFetch(baseFetch) : baseFetch;
-    const tracked = trackedSearchFetch(requestFetch, activity => {
-      if (!signal.aborted && !answerStarted && activity.status === 'active') onActivity?.('web_search');
-    });
-    const stream = models.streamSimple(model, context, {
-      ...options,
-      signal,
-      onPayload: options.onPayload ? payload => withHostedSearch(payload, requireSearch || seekImage) : undefined,
-      fetch: options.onPayload ? tracked.fetch : requestFetch,
-    });
-    for await (const event of stream) {
-      if (signal.aborted) throw new Error('Request cancelled');
-      if (event.type === 'thinking_start') onActivity?.('thinking');
-      else if (event.type === 'text_start') {
-        answerStarted = true;
-        onActivity?.('writing_result');
-      }
+): Promise<AssistantMessage & { research: MealResearch; executedTools: string[] }> {
+  // Resolve application tools only at execution time: their mutations call the
+  // meal processor, which itself imports this provider module.
+  const [{ createCalDoneTools }, chat, { getPreference }] = await Promise.all([
+    import('./chatTools'), import('../data/chatRepository'), import('../data/mealRepository'),
+  ]);
+  const thread = await chat.preferredMealThread(execution.mealId, true) ?? await chat.preferredMealThread(execution.mealId, false);
+  const stored = await chat.loadMealChatMessages(execution.mealId);
+  const sessionId = thread?.id ?? `meal-analysis-${execution.mealId}`;
+  const known = new Set<string>();
+  const messages = completedChatContext([...stored, ...execution.conversation ?? []].map(chat.sanitizeChatMessage).filter(message => {
+    const key = JSON.stringify(message);
+    if (known.has(key)) return false;
+    known.add(key);
+    return true;
+  }));
+  const customInstructions = await getPreference('assistant_custom_instructions');
+  const observations: Promise<MealResearch>[] = [];
+  const executedTools: string[] = [];
+  let firstResponse = true;
+  let agent: Agent;
+  agent = createRuntimeAgent({
+    initialState: {
+      model, messages, thinkingLevel: options.reasoning ?? 'off',
+      systemPrompt: `${buildChatPrompt({ language: execution.language, selectedMealId: execution.mealId, now: Date.now(), customInstructions })}
+
+Current task: calculate the specified meal using the same CalDone tools as chat. Search meal history, read relevant saved records and open their photos when useful, especially when the user refers to a previous meal. Earlier portions are not proof of the current portion. The caller owns saving this result; return the calculation instead of invoking data-changing tools or recursively invoking meal analysis. If clarification is needed, return its questions and choices with your estimate in the final meal JSON. Do not finish with conversational prose.
+${context.systemPrompt}`,
+      tools: createCalDoneTools({
+        threadId: sessionId, getMessages: () => agent.state.messages,
+        attachments: new Map(messages.flatMap(message => message.role === 'chatUser' ? message.attachments.map(photo => [photo.id, photo] as const) : [])),
+        onDataChanged: async () => {}, deferMutations: true,
+      }),
+    },
+    sessionId,
+    streamFn: (activeModel, nextContext, agentOptions) => {
+      const requestFetch = capture ? capture.wrapFetch(options.fetch ?? expoFetch as typeof globalThis.fetch) : options.fetch ?? expoFetch as typeof globalThis.fetch;
+      const tracked = trackedSearchFetch(requestFetch, activity => {
+        if (activity.status === 'active') onActivity?.('web_search');
+      });
+      const forceSearch = firstResponse && (requireSearch || seekImage);
+      const stream = models.streamSimple(activeModel, nextContext, {
+        ...options, ...agentOptions,
+        onPayload: options.onPayload ? payload => withHostedSearch(payload, forceSearch) : undefined,
+        fetch: options.onPayload ? tracked.fetch : requestFetch, transport: 'sse',
+      });
+      observations.push(stream.result().then(async response => {
+        capture?.response({text: contentText(response.content), responseId: response.responseId, stopReason: response.stopReason, error: response.errorMessage});
+        if (response.stopReason === 'error' || response.stopReason === 'aborted') return {status: 'unobserved', sources: []};
+        firstResponse = false;
+        return options.onPayload ? tracked.result() : {status: 'unavailable', sources: []};
+      }));
+      return stream;
+    },
+  });
+  const unsubscribe = agent.subscribe(event => {
+    if (event.type === 'message_update') {
+      if (event.assistantMessageEvent.type === 'thinking_start') onActivity?.('thinking');
+      if (event.assistantMessageEvent.type === 'text_start') onActivity?.('writing_result');
+    } else if (event.type === 'tool_execution_start') {
+      executedTools.push(event.toolName);
+      onActivity?.('thinking');
     }
-    const result = await stream.result();
-    capture?.response({ text: contentText(result.content), responseId: result.responseId, stopReason: result.stopReason, error: result.errorMessage });
-    if (result.stopReason === 'error' || result.stopReason === 'aborted') throw new Error(result.errorMessage ?? 'Meal request failed');
-    const research: MealResearch = options.onPayload ? await tracked.result() : {status:'unavailable',sources:[]};
+  });
+  try {
+    await requestWithDeadline(async signal => {
+      const abort = () => agent.abort();
+      signal.addEventListener('abort', abort, { once: true });
+      try {
+        signal.throwIfAborted();
+        await agent.prompt(context.messages);
+        if (isConnectionError(agent.state.errorMessage)) {
+          const remaining = continuationMessages(agent.state.messages);
+          if (remaining) {
+            await waitForConnectionRecovery(signal);
+            signal.throwIfAborted();
+            agent.state.messages = remaining;
+            await agent.continue();
+          }
+        }
+        signal.throwIfAborted();
+        if (agent.state.errorMessage) throw new Error(agent.state.errorMessage);
+      } finally { signal.removeEventListener('abort', abort); }
+    }, options.signal);
+    const response = agent.state.messages.at(-1);
+    if (response?.role !== 'assistant' || response.stopReason !== 'stop') throw new Error('Meal analysis did not return a completed result');
+    const results = await Promise.all(observations);
+    const sources = new Map(results.flatMap(result => result.sources.map(source => [source.url, source] as const)));
+    // Research belongs to the whole tool loop, not just its last prose/JSON turn.
+    const status = results.some(result => result.status === 'completed') ? 'completed'
+      : results.some(result => result.status === 'failed') ? 'failed'
+      : results.some(result => result.status === 'not_searched') ? 'not_searched'
+      : options.onPayload ? 'unobserved' : 'unavailable';
+    const research: MealResearch = {status, sources: [...sources.values()]};
     acceptMealResearch(research, requireSearch);
-    return Object.assign(result, {research});
-  }, options.signal), () => waitForConnectionRecovery(options.signal));
+    return {...response, research, executedTools};
+  } finally { unsubscribe(); agent.abort(); }
 }
 
 export async function analyzeMeal(input: {
+  conversation?: AgentMessage[];
   signal?: AbortSignal;
   existingMeal?: import('../domain/meal').MealAnalysis;
   requireSearch?: boolean;
@@ -504,7 +581,7 @@ export async function analyzeMeal(input: {
     let response: AssistantMessage & { research: MealResearch };
     try {
       response = await completeMealRequest(
-        model,
+        input, model,
         {
           systemPrompt: buildMealAnalysisPrompt(input.language, Boolean(input.existingMeal)),
           messages: [
@@ -547,6 +624,7 @@ export async function analyzeMeal(input: {
 }
 
 export async function refineMealAnalysis(input: {
+  conversation?: AgentMessage[];
   requireSearch?: boolean;
   assistantInterpretation?: string;
   mealId: string;
@@ -565,7 +643,7 @@ export async function refineMealAnalysis(input: {
   let response: AssistantMessage & { research: MealResearch };
   try {
     response = await completeMealRequest(
-      model,
+      input, model,
       {
         systemPrompt: buildMealRefinementPrompt(input.language),
         messages: [{
@@ -591,6 +669,7 @@ export async function refineMealAnalysis(input: {
 }
 
 export async function correctMealAnalysis(input: {
+  conversation?: AgentMessage[];
   requireSearch?: boolean;
   mealId: string;
   previousJson: string;
@@ -606,7 +685,7 @@ export async function correctMealAnalysis(input: {
   let response: AssistantMessage & { research: MealResearch };
   try {
     response = await completeMealRequest(
-      model,
+      input, model,
       {
         systemPrompt: buildMealCorrectionPrompt(input.language),
         messages: [{

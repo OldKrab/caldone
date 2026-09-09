@@ -189,66 +189,72 @@ export async function processPendingMeals(): Promise<void> {
 
 export async function answerMealClarification(id: string, answer: string, answeredInThreadId?: string, signal?: AbortSignal, context?: MealRequestContext): Promise<void> {
   return submitMealAnswer(id, async () => {
-    const meal = await getMeal(id);
-    const clarification = meal?.analysis?.clarification;
-    if (!meal?.analysis || !clarification) return;
-
-    const questions = mealQuestions(clarification);
-    const evidence = dishClarificationInput(meal);
-    const thread = await ensureClarificationThread(id, meal.analysis.title);
-    await syncMealQuestionsToThread(thread.id, id, questions, meal.capturedAt);
-    if (!answeredInThreadId) await appendInlineMealAnswer(thread.id, answer);
-
-    await setMealStatus(id, 'analyzing');
-    let release: (() => Promise<void>) | undefined;
+    // Background recovery must not restart this meal without the user's answer.
+    if (processing.has(id)) throw new Error('This meal is already being analyzed');
+    processing.add(id);
     try {
-      release = await beginForegroundWork();
-      setMealActivity(id, 'reviewing_meal');
-      // Clarification is a fresh provider request: the prior analysis does not
-      // carry image bytes forward. Reload the saved meal's visual evidence.
-      const photos = await Promise.all(evidence.photos.map(async (photo) => ({
-        base64: await new File(photo.uri).base64(),
-        mimeType: photo.mimeType,
-      })));
-      const result = await refineMealAnalysis({
-        mealId: id,
-        signal,
-        photos,
-        note: evidence.note,
-        previousJson: mealAnalysisEvidenceJson(evidence.analysis),
-        question: questions.join('\n'),
-        answer,
-        assistantInterpretation: context?.assistantInterpretation,
-        requireSearch: context?.requireSearch,
-        language: locale === 'ru' ? 'Russian' : 'English',
-        onActivity: (activity) => setMealActivity(id, activity),
-      });
-      const analysis = mergeDishClarification(meal.analysis, await parseMealResult(result, meal.photos.length > 0, undefined, imageLookupDiagnostics(id)));
-      setMealActivity(id, 'saving_result');
-      await saveMealAnalysis(id, analysis);
-      const remainingQuestions = mealQuestions(analysis.clarification);
-      if (remainingQuestions.length > 0) {
-        const thread = await ensureClarificationThread(id, analysis.title);
-        await syncMealQuestionsToThread(thread.id, id, remainingQuestions);
-        if (answeredInThreadId && answeredInThreadId !== thread.id) {
-          await syncMealQuestionsToThread(answeredInThreadId, id, remainingQuestions);
+      const meal = await getMeal(id);
+      const clarification = meal?.analysis?.clarification;
+      if (!meal?.analysis || !clarification) return;
+
+      const questions = mealQuestions(clarification);
+      const evidence = dishClarificationInput(meal);
+      const thread = await ensureClarificationThread(id, meal.analysis.title);
+      await syncMealQuestionsToThread(thread.id, id, questions, meal.capturedAt);
+      if (answeredInThreadId !== thread.id) await appendInlineMealAnswer(thread.id, answer);
+
+      await setMealStatus(id, 'analyzing');
+      let release: (() => Promise<void>) | undefined;
+      try {
+        release = await beginForegroundWork();
+        setMealActivity(id, 'reviewing_meal');
+        // Clarification is a fresh provider request: the prior analysis does not
+        // carry image bytes forward. Reload the saved meal's visual evidence.
+        const photos = await Promise.all(evidence.photos.map(async (photo) => ({
+          base64: await new File(photo.uri).base64(),
+          mimeType: photo.mimeType,
+        })));
+        const result = await refineMealAnalysis({
+          mealId: id,
+          signal,
+          photos,
+          note: evidence.note,
+          previousJson: mealAnalysisEvidenceJson(evidence.analysis),
+          question: questions.join('\n'),
+          answer,
+          assistantInterpretation: context?.assistantInterpretation,
+          conversation: context?.conversation,
+          requireSearch: context?.requireSearch,
+          language: locale === 'ru' ? 'Russian' : 'English',
+          onActivity: (activity) => setMealActivity(id, activity),
+        });
+        const analysis = mergeDishClarification(meal.analysis, await parseMealResult(result, meal.photos.length > 0, undefined, imageLookupDiagnostics(id)));
+        setMealActivity(id, 'saving_result');
+        await saveMealAnalysis(id, analysis);
+        const remainingQuestions = mealQuestions(analysis.clarification);
+        if (remainingQuestions.length > 0) {
+          const thread = await ensureClarificationThread(id, analysis.title);
+          await syncMealQuestionsToThread(thread.id, id, remainingQuestions);
+          if (answeredInThreadId && answeredInThreadId !== thread.id) {
+            await syncMealQuestionsToThread(answeredInThreadId, id, remainingQuestions);
+          }
         }
+      } catch (error) {
+        await setMealStatus(
+          id,
+          'needs_input',
+          error instanceof Error ? error.message : String(error),
+        );
+        throw error;
+      } finally {
+        await release?.().catch(() => undefined);
+        setMealActivity(id);
       }
-    } catch (error) {
-      await setMealStatus(
-        id,
-        'needs_input',
-        error instanceof Error ? error.message : String(error),
-      );
-      throw error;
-    } finally {
-      await release?.().catch(() => undefined);
-      setMealActivity(id);
-    }
+    } finally { processing.delete(id); }
   });
 }
 
-export async function correctSavedMeal(id: string, correction: string): Promise<void> {
+export async function correctSavedMeal(id: string, correction: string, context?: MealRequestContext): Promise<void> {
   const meal = await getMeal(id);
   if (!meal?.analysis) return;
 
@@ -261,6 +267,7 @@ export async function correctSavedMeal(id: string, correction: string): Promise<
       mealId: id,
       previousJson: mealAnalysisEvidenceJson(meal.analysis),
       correction,
+      conversation: context?.conversation,
       language: locale === 'ru' ? 'Russian' : 'English',
       onActivity: (activity) => setMealActivity(id, activity),
     });
@@ -282,7 +289,7 @@ export async function reanalyzeSavedMeal(id: string, instruction?: string, conte
   const meal = await getMeal(id);
   if (!meal) throw new Error('Meal was not found');
   if (!hasMealInput(meal)) {
-    if (meal.analysis && instruction?.trim()) return correctSavedMeal(id, instruction);
+    if (meal.analysis && instruction?.trim()) return correctSavedMeal(id, instruction, context);
     throw new Error('This meal has no saved description or photos to analyze');
   }
   if (processing.has(id)) throw new Error('This meal is already being analyzed');
@@ -305,6 +312,7 @@ export async function reanalyzeSavedMeal(id: string, instruction?: string, conte
       note,
       requireSearch: context?.requireSearch,
       assistantInterpretation: context?.assistantInterpretation,
+      conversation: context?.conversation,
       language: locale === 'ru' ? 'Russian' : 'English',
       onActivity: (activity) => setMealActivity(id, activity),
     });

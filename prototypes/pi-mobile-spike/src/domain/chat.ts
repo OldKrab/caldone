@@ -34,6 +34,20 @@ export function newChatUserMessage(text: string, timestamp = Date.now()): ChatUs
   return { role: 'chatUser', text: text.trim(), attachments: [], timestamp };
 }
 
+/** A nested analysis may start while its parent tool call is unfinished.
+ * Forward completed tool exchanges and original messages, never half a call. */
+export function completedChatContext(messages: readonly AgentMessage[]): AgentMessage[] {
+  const calls = new Set(messages.flatMap(message => message.role === 'assistant'
+    ? message.content.flatMap(block => block.type === 'toolCall' ? [block.id] : []) : []));
+  const completed = new Set(messages.flatMap(message => message.role === 'toolResult' && calls.has(message.toolCallId) ? [message.toolCallId] : []));
+  return messages.flatMap((message): AgentMessage[] => {
+    if (message.role === 'toolResult') return completed.has(message.toolCallId) ? [message] : [];
+    if (message.role !== 'assistant') return [message];
+    const content = message.content.filter(block => block.type !== 'thinking' && (block.type !== 'toolCall' || completed.has(block.id)));
+    return content.length ? [{...message, content}] : [];
+  });
+}
+
 export type ChatThread = {
   id: string;
   title: string;

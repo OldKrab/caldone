@@ -51,3 +51,10 @@ test('a user who cannot quantify their portion is not asked for alternative meas
   assert.match(prompt,/do not ask for weight, dimensions, counts/);
   assert.match(prompt,/finish the estimate with answer_meal_question/);
 });
+
+test('disputing recognition triggers photo inspection without treating the disputed question as confirmation', () => {
+  const prompt = buildChatPrompt({language: 'Russian', selectedMealId: 'meal-1', selectedMealQuestions: ['How many loaves?'], now: 0});
+  assert.match(prompt, /If the user disputes.*view_meal_photos/);
+  assert.match(prompt, /Echoed questions are not user confirmation/);
+  assert.match(prompt, /Do not claim text is printed on packaging unless you can read it in the actual photo/);
+});
