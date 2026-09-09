@@ -551,7 +551,7 @@ function CalDoneApp() {
       setAuthenticated(true);
       setShowSetup(false);
       await SecureStore.setItemAsync('caldone.setup.v2.complete', 'true');
-      await applyNotificationPreferences(notificationPreferences, false);
+      await applyNotificationPreferences(notificationPreferences, false, { requestPermission: true });
       await processPendingMeals();
       await refresh();
     } finally {
@@ -572,11 +572,15 @@ function CalDoneApp() {
   };
 
   const persistNotifications = async (preferences: NotificationPreferences) => {
+    const requestPermission = Object.entries(preferences).some(
+      ([key, enabled]) => enabled && !notificationPreferences[key as keyof NotificationPreferences],
+    );
     await savePreference('notification_preferences', JSON.stringify(preferences));
     setNotificationPreferences(preferences);
     await applyNotificationPreferences(
       preferences,
       meals.some((meal) => meal.capturedAt >= startOfDay(Date.now())),
+      { requestPermission },
     );
   };
 

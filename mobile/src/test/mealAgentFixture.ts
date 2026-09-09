@@ -50,7 +50,15 @@ const sources: Record<string, string> = {
   'expo/fetch': 'export const fetch=(...args)=>globalThis.__clarification.fetch(...args);',
   'expo-sqlite': 'export const openDatabaseSync=()=>globalThis.__clarification.database;',
   'expo-file-system': 'export class File {constructor(uri){this.uri=uri}async base64(){return this.uri.includes("previous")?"cHJldmlvdXM=":"cGhvdG8="}} export class Directory {} export const Paths={};',
-  'expo-notifications': 'export const setNotificationHandler=()=>{};',
+  'expo-notifications': `export const setNotificationHandler=()=>{};
+    export const AndroidImportance={DEFAULT:3};
+    export const SchedulableTriggerInputTypes={DATE:'date'};
+    export const setNotificationChannelAsync=async()=>{};
+    export const setNotificationCategoryAsync=async()=>{};
+    export const getPermissionsAsync=async()=>globalThis.__clarification.notifications.permission;
+    export const requestPermissionsAsync=async()=>globalThis.__clarification.notifications.request();
+    export const scheduleNotificationAsync=async request=>globalThis.__clarification.notifications.schedule(request);
+    export const cancelScheduledNotificationAsync=async id=>globalThis.__clarification.notifications.cancel(id);`,
   'expo-secure-store': 'export const getItemAsync=async key=>key.includes("web-search")?String(globalThis.__clarification.enabled):null;',
   '../services/mealRequestTraceStore': 'export const mealRequestDiagnostics=globalThis.__clarification.diagnostics;',
   './mobileRuntime': 'export const installPiMobileRuntime=()=>{};',

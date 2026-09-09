@@ -67,21 +67,27 @@ export async function prepareMealNotifications(): Promise<void> {
       placeholder: t('answerPlaceholder'),
     },
   }]);
-  const current = await Notifications.getPermissionsAsync();
-  if (!current.granted && current.canAskAgain) {
-    await Notifications.requestPermissionsAsync();
-  }
 }
 
 async function notificationPreferences(): Promise<NotificationPreferences> {
   return parsePreference(await getPreference('notification_preferences'), defaultNotificationPreferences);
 }
 
+/** Restoring preferences or updating reminders must never reopen a denied prompt.
+ * Only setup completion or an explicit notification opt-in may request permission.
+ */
 export async function applyNotificationPreferences(
   preferences: NotificationPreferences,
   hasMealsToday = false,
+  options: { requestPermission?: boolean } = {},
 ): Promise<void> {
   await prepareMealNotifications();
+  if (options.requestPermission) {
+    const current = await Notifications.getPermissionsAsync();
+    if (!current.granted && current.canAskAgain) {
+      await Notifications.requestPermissionsAsync();
+    }
+  }
   const existingId = await getPreference(REMINDER_ID_KEY);
   if (existingId) {
     await Notifications.cancelScheduledNotificationAsync(existingId).catch(() => undefined);
