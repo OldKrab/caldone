@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 10
     defaults:
       run:
-        working-directory: prototypes/pi-mobile-spike
+        working-directory: mobile
         shell: bash
     steps:
       - uses: actions/checkout@v5
@@ -28,10 +28,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: prototypes/pi-mobile-spike/package-lock.json
+          cache-dependency-path: mobile/package-lock.json
       - run: npm ci
       - run: npm run check
       - name: Run all tests, including nested feature tests
         run: |
-          shopt -s globstar
-          node --test src/**/*.test.ts
+          npm test

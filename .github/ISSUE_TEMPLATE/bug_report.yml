@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a problem in the Android app.
+title: ""
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: App and device
+      description: App version, Android version, and device model.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include enough detail to reproduce the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots or diagnostics
+      description: Optional. Remove credentials, account identifiers, and private meal or conversation content before uploading.
