@@ -34,3 +34,16 @@ test('one user request remains available to every meal tool in the same turn', (
   assert.deepEqual(context.userMessages,['Google both drinks and update both meals']);
   assert.equal(context.requireSearch,true);
 });
+
+
+test('a failed research attempt only constrains retries of the same meal in the same turn', () => {
+  const messages: any[] = [
+    {role: 'chatUser', text: 'Recalculate both meals'},
+    {role: 'assistant', content: [{type: 'toolCall', id: 'attempt', name: 'reanalyze_meal', arguments: {mealId: 'rice', requireSearch: true}}]},
+    {role: 'toolResult', toolCallId: 'attempt', toolName: 'reanalyze_meal', isError: true},
+  ];
+  assert.equal(mealRequestContext(messages, undefined, false, 'rice').requireSearch, true);
+  assert.equal(mealRequestContext(messages, undefined, false, 'eggs').requireSearch, false);
+  messages.push({role: 'chatUser', text: "Don't search. Just change the portion."});
+  assert.equal(mealRequestContext(messages, undefined, false, 'rice').requireSearch, false);
+});

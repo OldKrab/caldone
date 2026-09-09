@@ -21,7 +21,10 @@ export function trackedSearchFetch(baseFetch: typeof globalThis.fetch, onActivit
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const response = await baseFetch(input, init);
     try {
-      observation = response.body && response.headers.get('content-type')?.includes('text/event-stream')
+      // Native responses can omit Content-Type. Only parsed terminal/tool events
+      // establish research evidence; the header alone is never proof.
+      const contentType = response.headers.get('content-type');
+      observation = response.body && (!contentType || contentType.includes('text/event-stream'))
         ? observe(response.clone(), onActivity)
         : Promise.resolve({status:'unobserved',sources:[]});
     } catch {
