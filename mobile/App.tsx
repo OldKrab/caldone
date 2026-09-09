@@ -198,7 +198,11 @@ function CalDoneApp() {
       if (!url) return;
       try {
         const parsed = new URL(url);
-        if (parsed.protocol === 'caldone:' && parsed.hostname === 'capture') setScreen('camera');
+        if (parsed.protocol === 'caldone:' && parsed.hostname === 'capture') {
+          // Widget capture has no journal-date context and always starts today.
+          setSelectedDay(startOfDay(Date.now()));
+          setScreen('camera');
+        }
       } catch {
         // Ignore unrelated or malformed deep links.
       }
@@ -330,7 +334,7 @@ function CalDoneApp() {
   };
 
   const addManualMeal = () => {
-    const capturedAt = Date.now();
+    const capturedAt = mealTimeOnDay(selectedDay);
     const meal: Meal = {
       id: `${capturedAt.toString(36)}-${Math.random().toString(36).slice(2, 9)}`,
       revision: 1,
@@ -417,7 +421,7 @@ function CalDoneApp() {
       }
       const meal = await createMeal({
         id: mealId,
-        capturedAt: Date.now(),
+        capturedAt: mealTimeOnDay(selectedDay),
         note: note.trim(),
         photos: storedPhotos,
       });
@@ -425,7 +429,7 @@ function CalDoneApp() {
       photos.forEach(deletePhoto);
       setPhotos([]);
       setNote('');
-      setSelectedDay(startOfDay(Date.now()));
+      setSelectedDay(startOfDay(meal.capturedAt));
       setScreen('home');
       await refresh();
       void applyNotificationPreferences(notificationPreferences, true);
@@ -1004,6 +1008,15 @@ function NavigationItem(props: {
       </>}
     </Pressable>
   );
+}
+
+// The journal owns the meal date; the current local clock supplies only its time.
+// Set calendar fields instead of adding milliseconds so DST days remain correct.
+function mealTimeOnDay(day: number): number {
+  const clock = new Date();
+  const date = new Date(day);
+  date.setHours(clock.getHours(), clock.getMinutes(), clock.getSeconds(), clock.getMilliseconds());
+  return date.getTime();
 }
 
 function startOfDay(timestamp: number): number {
