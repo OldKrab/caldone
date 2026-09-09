@@ -282,7 +282,7 @@ export function createCalDoneTools(input: {
           undo: { kind: 'restore_meal', meal: before, expectedMeal: next },
         });
         await input.onDataChanged();
-        return actionResult(action.id, action.label, { ...mealSummary(next), research: next.analysis?.research, confirmation: mealConfirmation(next, locale === 'ru' ? 'ru' : 'en') });
+        return actionResult(action.id, action.label, { ...mealSummary(next), research: next.analysis?.research, confirmation: mealConfirmation(next, locale === 'ru' ? 'ru' : 'en', context.requireSearch) });
       }),
     },
     {
@@ -309,7 +309,7 @@ export function createCalDoneTools(input: {
           undo: { kind: 'restore_meal', meal: before, expectedMeal: next },
         });
         await input.onDataChanged();
-        return actionResult(action.id, action.label, { ...mealSummary(next), research: next.analysis?.research, confirmation: mealConfirmation(next, locale === 'ru' ? 'ru' : 'en') });
+        return actionResult(action.id, action.label, { ...mealSummary(next), research: next.analysis?.research, confirmation: mealConfirmation(next, locale === 'ru' ? 'ru' : 'en', context.requireSearch) });
       }),
     },
     {

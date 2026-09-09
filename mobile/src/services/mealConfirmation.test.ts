@@ -4,13 +4,13 @@ import { mealConfirmation, confirmationForTurn } from './mealConfirmation.ts';
 
 const meal:any={analysis:{title:'Spritz',items:[{name:'Spritz',quantity:'500 ml'}],totals:{calories:200,protein:0,carbs:50,fat:0}}};
 test('confirmation uses the observed outcome and never converts no search to no online match',()=>{
-  const text=mealConfirmation(meal,'en');
+  const text=mealConfirmation(meal,'en',true);
   assert.match(text,/200 kcal/);
   assert.match(text,/50 g/);
   assert.match(text,/not searched/i);
   assert.doesNotMatch(text,/not found/i);
   meal.analysis.research={status:'unavailable',sources:[]};
-  assert.match(mealConfirmation(meal,'ru'),/недоступен/);
+  assert.match(mealConfirmation(meal,'ru',true),/недоступен/);
   meal.analysis.research={status:'completed',sources:[{url:'https://example.org/drink',title:'Product'}]};
   assert.match(mealConfirmation(meal,'en'),/https:\/\/example.org\/drink/);
   assert.match(mealConfirmation(meal,'en'),/estimate/i);
@@ -21,3 +21,13 @@ test('only app-owned successful analysis receipts can supply the final confirmat
   messages.push({role:'chatUser',text:'Why?'});
   assert.equal(confirmationForTurn(messages),undefined);
 });
+
+for (const status of ['not_searched', 'unobserved', 'unavailable', 'failed'] as const) {
+  test(`ordinary estimates omit ${status} diagnostics but requested research explains them`, () => {
+    const estimate = {...meal, analysis: {...meal.analysis, research: {status, sources: []}}};
+    const text = mealConfirmation(estimate, 'en');
+    assert.match(text, /Recorded estimate: 200 kcal/);
+    assert.doesNotMatch(text, /web|search/i);
+    assert.match(mealConfirmation(estimate, 'en', true), /web/i);
+  });
+}

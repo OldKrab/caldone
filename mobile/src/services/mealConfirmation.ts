@@ -3,7 +3,7 @@ import type { Meal } from '../domain/meal';
 
 /** Mutation confirmations describe saved values and observed research. They are
  * app-owned so a second model cannot invent a provenance story after saving. */
-export function mealConfirmation(meal: Meal, language: 'ru' | 'en'): string {
+export function mealConfirmation(meal: Meal, language: 'ru' | 'en', requireSearch = false): string {
   if (!meal.analysis) return '';
   const {totals,items,research} = meal.analysis;
   const ru = language === 'ru';
@@ -13,6 +13,10 @@ export function mealConfirmation(meal: Meal, language: 'ru' | 'en'): string {
     ? `${quantity}Записана оценка: ${number(totals.calories)} ккал, белки ${number(totals.protein)} г, жиры ${number(totals.fat)} г, углеводы ${number(totals.carbs)} г.`
     : `${quantity}Recorded estimate: ${number(totals.calories)} kcal, ${number(totals.protein)} g protein, ${number(totals.fat)} g fat, ${number(totals.carbs)} g carbs.`;
   const status = research?.status ?? 'not_searched';
+  // Unrequested search limitations do not affect a successfully saved estimate.
+  // Keep requested research outcomes and completed searches visible.
+  const confirmation = `${meal.analysis.title}: ${estimate}`;
+  if (!requireSearch && status !== 'completed') return confirmation;
   const explanations = {
     not_searched: ru ? 'Веб-поиск не выполнялся.' : 'The web was not searched.',
     completed: ru ? 'Веб-поиск выполнен. Значения остаются оценочными.' : 'Web search completed. Values remain estimates.',
@@ -27,7 +31,7 @@ export function mealConfirmation(meal: Meal, language: 'ru' | 'en'): string {
       return [`[${url.hostname}](${url.href.replaceAll('(', '%28').replaceAll(')', '%29')})`];
     } catch { return []; }
   });
-  return `${meal.analysis.title}: ${estimate}\n\n${explanations[status]}${links.length ? `\n${ru ? 'Источники поиска' : 'Search sources'}: ${links.join(', ')}` : ''}`;
+  return `${confirmation}\n\n${explanations[status]}${links.length ? `\n${ru ? 'Источники поиска' : 'Search sources'}: ${links.join(', ')}` : ''}`;
 }
 
 export function confirmationForTurn(messages: AgentMessage[]): string | undefined {
