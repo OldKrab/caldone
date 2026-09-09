@@ -1,15 +1,12 @@
-# CalDone project rules
+# CalDone
 
-## App-owned dialogs
+CalDone is an Android food diary with editable nutrition estimates and an AI assistant.
 
-- Never use `Alert.alert`, stock Android action dialogs, or other default platform UI for app-owned menus, confirmations, notices, and errors.
-- Use `AnchoredMenu` for three-dot/header overflow menus. The menu opens beside its trigger and does not dim the screen.
-- Use `AppDialog` for confirmations, notices, errors, and bottom actions that do not have an anchored trigger.
-- OS-owned permission, authentication, camera, photo-picker, and share UI is allowed.
+Before a repository-wide audit or cleanup, establish the checkout's branch, uncommitted changes, and relationship to the current remote default branch. State which revision the findings or changes cover.
 
-## Repository layout
-
-- Production Android app: `mobile/`.
-- Product, design, and domain references: `docs/product.md`, `docs/design.md`, and `docs/domain.md`.
-- Development and release instructions: `docs/development.md`.
-- Local generated evidence belongs in ignored `artifacts/`; public screenshots belong in `docs/images/`.
+- Product behavior or scope: read [product guidance](docs/product.md).
+- Domain terminology or data concepts: read [domain language](docs/domain.md).
+- UI changes: read [design guidance](docs/design.md), including the app-owned [menu and dialog rules](docs/design.md#menus-and-dialogs).
+- Assistant runtime changes: read the [runtime decision](docs/adr/0001-pi-agent-for-assistant-runtime.md).
+- Setup, builds, or releases: read [development guidance](docs/development.md).
+- Preparing changes for review or publication: read [contribution guidance](CONTRIBUTING.md).

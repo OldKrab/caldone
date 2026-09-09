@@ -117,7 +117,12 @@ Shared controls and images use 14dp corners; working surfaces use 18dp; small de
 - **Navigation:** A white bottom surface with a fine top divider, icon and 12sp label destinations, and a sage selected indicator. Selection and press feedback stay inside the same small 58×30dp icon pill; the whole destination does not acquire a competing pressed background. Capture has its own footer above it.
 - **Welcome, setup, settings, providers:** First open has a dedicated welcome surface with the brand, a short introduction, three photo/breakdown/correction steps, and one start action. Redesigned setup stages carry a clear step hierarchy and shared green choices/actions. Settings retain native typography and quiet rows. Provider selection uses its control to communicate state without repetitive selection copy.
 - **Assistant:** Restrained conversation, readable prose, quiet operational states and a reachable composer. Messages and clarification questions use native long-press text selection; no persistent Copy buttons. Inline meal analysis is visible in chat and refreshes its questions on completion. Meal clarifications and structured Assistant questions offer selectable answers, Not sure, and optional custom text. No answer is preselected; Send answers submits the explicit selections together. Choices wrap into 48dp-minimum touch targets, and historical Assistant questions become inactive after a reply. Legacy meal questions remain readable without generated presets. Transient connection failures retry once after foreground recovery; persistent failures offer an explicit retry. One tool call stays a direct operational row; consecutive calls across internal messages share a stable collapsible group. User messages and assistant prose break groups to preserve chronology. Labels stay generic until execution starts; execution events supply running, completed, failed, and cancelled states. Active and failed rows remain visible when completed details collapse. Action receipts expose before/after snapshots through “What changed” and keep Undo separate; missing historical detail is stated explicitly. Avoid AI decoration, fake progress, or visual claims of nutrition certainty.
-- **Menus and dialogs:** Use `AnchoredMenu` beside overflow triggers without a dimmed backdrop. Use `AppDialog` for app-owned confirmations, notices, errors, and unanchored actions. OS-owned permission, authentication, camera, photo-picker, and share interfaces may remain native.
+
+### Menus and dialogs
+
+Use `AnchoredMenu` for three-dot and header overflow menus, beside their trigger without a dimmed backdrop. Use `AppDialog` for app-owned confirmations, notices, errors, and bottom actions without an anchored trigger. App-owned interactions must not use `Alert.alert`, stock Android action dialogs, or other default platform UI.
+
+OS-owned permission, authentication, camera, photo-picker, and share interfaces may remain native.
 
 ## Do's and Don'ts
 
@@ -127,5 +132,4 @@ Shared controls and images use 14dp corners; working surfaces use 18dp; small de
 - **Do** show state with words or icons as well as color.
 - **Don't** reintroduce condensed kitchen-ticket fonts, perforation motifs, or large overlapping capture panels.
 - **Don't** turn every row into a floating card or every state into a prominent badge.
-- **Don't** use `Alert.alert` or stock platform dialogs for app-owned interactions.
 - **Don't** claim screenshot approval, dark-theme support, or device validation from source checks.
