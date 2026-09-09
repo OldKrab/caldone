@@ -74,6 +74,26 @@ test('plain text in a meal chat answers its pending question and recalculates th
   } finally { await session.close(); }
 });
 
+test('a plain estimate answer confirms the saved meal without unrelated search diagnostics', async () => {
+  const {openChatSession} = await import('./chatSession.ts');
+  await meals.saveMealRecord({id: 'quiet-estimate', revision: 1, capturedAt: Date.now(), status: 'needs_input', photos: [], note: initial.title, analysis: initial});
+  const thread = await chat.ensureClarificationThread('quiet-estimate', initial.title);
+  await chat.syncMealQuestionsToThread(thread.id, 'quiet-estimate', initial.clarification.questions);
+  fixture.enabled = true;
+  fixture.respond = async () => ({...initial, clarification: undefined});
+  const session = await openChatSession({thread, selectedMealId: 'quiet-estimate', onChanged: () => {}, onDataChanged: async () => {}});
+  try {
+    await session.send('I do not care about those details. Just use a reasonable estimate and finish logging this meal. Please do not ask any more questions.', []);
+    assert.equal((await meals.getMeal('quiet-estimate'))?.status, 'complete');
+    const messages = await chat.loadChatMessages(thread.id);
+    const confirmation = messages.findLast(message => message.role === 'assistant');
+    assert.ok(confirmation?.role === 'assistant');
+    const text = confirmation.content.filter(block => block.type === 'text').map(block => block.text).join('\n');
+    assert.match(text, /400/);
+    assert.doesNotMatch(text, /web|search|веб|поиск/i);
+  } finally { await session.close(); }
+});
+
 
 test('a later answer retains earlier milk and sauce answers, while background recovery cannot replace the active request', async () => {
   await meals.saveMealRecord({id: 'answer-history', revision: 1, capturedAt: Date.now(), status: 'needs_input', photos: [], note: initial.title, analysis: initial});
