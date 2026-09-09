@@ -36,6 +36,7 @@ import { KeyboardSafeArea } from '../../components/KeyboardSafeArea';
 import { ScreenReveal } from '../../components/ScreenReveal';
 import { color, radius, space, type } from '../../design/tokens';
 import { locale, t } from '../../i18n';
+import { providerLoginError } from '../../ai/providerLoginError';
 
 type PendingPrompt = {
   prompt: AuthPrompt;
@@ -147,8 +148,9 @@ export function ProviderSetupScreen(props: {
       setCatalogOpen(false);
       setExpanded(undefined);
       setStatus('');
-    } catch {
-      setError(t('providerConnectionError'));
+    } catch (error) {
+      const failure = providerLoginError(error);
+      setError(`${t(failure.key)} [${failure.code}]`);
       setStatus('');
     } finally {
       setConnecting(false);

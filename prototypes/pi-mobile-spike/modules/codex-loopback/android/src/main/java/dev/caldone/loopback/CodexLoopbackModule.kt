@@ -12,6 +12,7 @@ import java.net.Socket
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import java.util.Locale
 import kotlin.concurrent.thread
 
 private const val PORT = 1455
@@ -141,19 +142,39 @@ class CodexLoopbackModule : Module() {
 
     val query = parseQuery(callback.rawQuery)
     if (query["state"] != expectedState) {
-      respond(socket, "400 Bad Request", "OAuth state mismatch.")
+      respond(socket, "400 Bad Request", loginPage(copy(
+        "This response belongs to an old or different sign-in attempt. Return to CalDone and start a fresh sign-in.",
+        "Этот ответ относится к старой или другой попытке входа. Вернитесь в CalDone и начните вход заново."
+      ), "AUTH_CALLBACK_STATE"))
+      // An old browser tab must not terminate the currently valid listener.
       return
     }
 
     query["error"]?.let { oauthError ->
-      respond(socket, "400 Bad Request", "OpenAI login was not completed.")
-      fail(IllegalStateException("OpenAI login failed: $oauthError"))
+      val sessionMismatch = oauthError == "request_forbidden" &&
+        query["error_description"]?.contains("CSRF", ignoreCase = true) == true
+      val reason = if (sessionMismatch) "csrf_mismatch" else "provider_rejected"
+      val message = if (sessionMismatch) copy(
+        "The browser login session changed or expired. Close old OpenAI login tabs and start a fresh sign-in from CalDone.",
+        "Сессия входа в браузере изменилась или истекла. Закройте старые вкладки входа OpenAI и начните новую попытку из CalDone."
+      ) else copy(
+        "The sign-in service declined this attempt. Return to CalDone to see the error and try again.",
+        "Сервис отклонил попытку входа. Вернитесь в CalDone, чтобы увидеть ошибку и повторить вход."
+      )
+      respond(socket, "400 Bad Request", loginPage(message,
+        if (sessionMismatch) "AUTH_BROWSER_SESSION" else "AUTH_PROVIDER_REJECTED"))
+      // Preserve a safe classification, never the provider's raw description,
+      // which can contain URLs or other authorization-session data.
+      fail(IllegalStateException("OpenAI login failed: $reason"))
       return
     }
 
     val code = query["code"]
     if (code.isNullOrEmpty()) {
-      respond(socket, "400 Bad Request", "Authorization code is missing.")
+      respond(socket, "400 Bad Request", loginPage(copy(
+        "The sign-in response did not contain a login code. Return to CalDone and start a fresh sign-in.",
+        "В ответе сервиса нет кода входа. Вернитесь в CalDone и начните вход заново."
+      ), "AUTH_CALLBACK_CODE"))
       return
     }
 
@@ -192,8 +213,22 @@ class CodexLoopbackModule : Module() {
     }
   }
 
-  private fun successPage(): String =
-    """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>CalDone login</title></head><body><p>Login complete. Returning to CalDone...</p><p><a href="$APP_RETURN_URI">Return to CalDone</a></p><script>location.replace('$APP_RETURN_URI')</script></body></html>"""
+  private fun copy(english: String, russian: String): String =
+    if (Locale.getDefault().language == "ru") russian else english
+
+  // Only app-owned copy and fixed diagnostic codes belong in this HTML.
+  // Never interpolate callback parameters or provider error descriptions.
+  private fun loginPage(message: String, code: String? = null, returnAutomatically: Boolean = false): String {
+    val diagnostic = if (code == null) "" else "<p>[$code]</p>"
+    val returnLabel = copy("Return to CalDone", "Вернуться в CalDone")
+    val redirect = if (returnAutomatically) "<script>location.replace('$APP_RETURN_URI')</script>" else ""
+    return """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>CalDone login</title></head><body><p>$message</p>$diagnostic<p><a href="$APP_RETURN_URI">$returnLabel</a></p>$redirect</body></html>"""
+  }
+
+  private fun successPage(): String = loginPage(copy(
+    "Authorization received. Returning to CalDone to finish connecting. Check the app for the final result.",
+    "Авторизация получена. Возвращаемся в CalDone для завершения подключения. Итоговый результат появится в приложении."
+  ), returnAutomatically = true)
 
   private fun complete(code: String) {
     val promise = synchronized(lock) {
