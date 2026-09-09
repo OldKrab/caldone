@@ -10,7 +10,7 @@ For a misidentified photo, enable **Capture next analysis with photo** in Settin
 
 ## Propose a change
 
-Keep changes focused. Open an issue before a substantial product or architecture change. Use a branch prefixed with `shushakov/`, follow the existing commit style, and include a ticket key when one is in scope. Write release notes in English.
+Keep changes focused. Open an issue before a substantial product or architecture change. Use a descriptive branch name, follow the existing commit style, and include a ticket key when one is in scope. Write release notes in English.
 
 From `mobile/`, run:
 
@@ -19,6 +19,6 @@ npm run check
 npm test
 ```
 
-Explain what changed and how you checked it. For interface changes, include current Android screenshots and state what still needs device verification. Changes to native modules or Expo config plugins also need a native build. Follow the app-owned dialog rules in `AGENTS.md`.
+Explain what changed and how you checked it. For interface changes, include current Android screenshots and state what still needs device verification. Changes to native modules or Expo config plugins also need a native build. Follow the [app-owned menu and dialog rules](docs/design.md#menus-and-dialogs).
 
 Keep APKs, local test evidence, diagnostic exports, credentials, and generated native output out of Git. Public screenshots should come from a current Android build, use sample data, and record the build version.
