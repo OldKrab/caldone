@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "CalDone",
+    "slug": "caldone",
+    "scheme": "caldone",
+    "version": "1.2.9",
+    "backgroundColor": "#F5F8F6",
+    "orientation": "portrait",
+    "icon": "./assets/caldone-fork-icon.png",
+    "userInterfaceStyle": "light",
+    "android": {
+      "package": "dev.caldone.app",
+      "versionCode": 22,
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "backgroundColor": "#176B4D",
+        "foregroundImage": "./assets/caldone-fork-icon.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "icon": "./assets/caldone-fork-icon.png"
+    },
+    "androidNavigationBar": {
+      "backgroundColor": "#F5F8F6",
+      "barStyle": "dark-content",
+      "enforceContrast": false
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "CalDone uses the camera to photograph meals without saving them to your gallery.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "CalDone lets you choose existing meal photos for analysis."
+        }
+      ],
+      "expo-notifications",
+      "expo-web-browser",
+      "expo-sqlite",
+      "expo-background-task",
+      "expo-sharing",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "CalDone needs photo access only when you save or share a meal photo.",
+          "savePhotosPermission": "CalDone saves a meal photo only after you choose Save to device.",
+          "granularPermissions": [
+            "photo"
+          ]
+        }
+      ],
+      "./plugins/withLauncherInset",
+      "./plugins/withCameraLenses"
+    ]
+  }
+}

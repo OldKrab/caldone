@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 45
     defaults:
       run:
-        working-directory: prototypes/pi-mobile-spike
+        working-directory: mobile
 
     steps:
       - name: Check out source
@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: prototypes/pi-mobile-spike/package-lock.json
+          cache-dependency-path: mobile/package-lock.json
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -48,8 +48,7 @@ jobs:
         shell: bash
         run: |
           npm run check
-          shopt -s globstar
-          node --test src/**/*.test.ts
+          npm test
 
       - name: Generate native Android project
         run: npx expo prebuild --platform android --no-install
@@ -84,7 +83,7 @@ jobs:
       - name: Verify and name APK
         id: artifact
         run: |
-          version=$(node -p "require('./package.json').version")
+          version=$(node -p "require('./app.json').expo.version")
           artifact="caldone-${version}-arm64.apk"
           cp android/app/build/outputs/apk/release/app-release.apk "$artifact"
 
@@ -118,7 +117,7 @@ jobs:
             exit 1
           fi
 
-          echo "path=prototypes/pi-mobile-spike/$artifact" >> "$GITHUB_OUTPUT"
+          echo "path=mobile/$artifact" >> "$GITHUB_OUTPUT"
           echo "name=$artifact" >> "$GITHUB_OUTPUT"
 
       - name: Upload workflow artifact
