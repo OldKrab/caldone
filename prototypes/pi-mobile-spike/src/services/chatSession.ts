@@ -21,6 +21,7 @@ import {
 } from '../data/chatRepository';
 import { appendDiagnosticEvent, deleteMeal, getDailyGoals, getGoalProfile, getMeal, getPreference, removePreference, replaceMeal, saveDailyGoals, saveGoalProfile } from '../data/mealRepository';
 import type { ChatAction, ChatAttachment, ChatThread, ChatUserMessage } from '../domain/chat';
+import { mealQuestions } from '../domain/meal';
 import { locale } from '../i18n';
 import { continuationMessages, isConnectionError } from './connectionRecovery';
 import { waitForConnectionRecovery } from './foregroundRecovery';
@@ -162,6 +163,9 @@ async function createOpenChatSession(input: OpenChatSessionInput, releaseLease: 
   let persistTask: Promise<void> = Promise.resolve();
   let hasSent = false;
   let recovering = false;
+  let answering = false;
+  let answerWasRouted = false;
+  let answerError: string | undefined;
   let recoveryAbort = new AbortController();
 
   const emit = () => input.onChanged({
@@ -174,11 +178,14 @@ async function createOpenChatSession(input: OpenChatSessionInput, releaseLease: 
     actions,
     toolExecutions: { ...toolExecutions },
     providerActivities: [...providerActivities.values()],
-    busy: agent.state.isStreaming || recovering,
+    busy: agent.state.isStreaming || recovering || answering,
     mealActivity,
     recovering,
-    error: agent.state.errorMessage ?? (() => {
+    error: answerWasRouted ? answerError : agent.state.errorMessage ?? (() => {
       const last = agent.state.messages.at(-1);
+      if (last?.role === 'toolResult' && last.isError && last.toolName === 'answer_meal_question') {
+        return last.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n');
+      }
       return last?.role === 'assistant' && last.stopReason === 'error' ? last.errorMessage : undefined;
     })(),
   });
@@ -260,7 +267,7 @@ async function createOpenChatSession(input: OpenChatSessionInput, releaseLease: 
   const unsubscribeMeal = subscribeMealActivity((activities) => {
     const previous = mealActivity;
     mealActivity = activities.get(input.selectedMealId ?? input.thread.mealId ?? '');
-    if (previous && !mealActivity && !agent.state.isStreaming) {
+    if (previous && !mealActivity && !agent.state.isStreaming && !answering) {
       reloadTask = reloadTask.then(async () => {
         if (closed) return;
         const [messages, nextActions] = await Promise.all([
@@ -292,9 +299,66 @@ async function createOpenChatSession(input: OpenChatSessionInput, releaseLease: 
     } finally { recovering = false; emit(); }
   };
 
+  // Composer text and button answers have the same meaning while a meal has
+  // an open clarification. Execute the registered tool directly so routing is
+  // deterministic and still retains its revision checks, receipt and Undo.
+  const pendingMealId = () => input.selectedMealId ?? input.thread.mealId ??
+    agent.state.messages.findLast(message => message.role === 'mealQuestion')?.mealId;
+  const applicationMessage = (content: AssistantMessage['content'], stopReason: AssistantMessage['stopReason']): AssistantMessage => ({
+    role: 'assistant', content, stopReason, timestamp: Date.now(),
+    api: agent.state.model.api, provider: agent.state.model.provider, model: agent.state.model.id,
+    // Application routing/receipts are not inference and incur no model usage.
+    usage: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0}},
+  });
+  const answerPendingQuestion = async (mealId: string | undefined, message?: ChatUserMessage): Promise<boolean> => {
+    if (!mealId) return false;
+    answering = true;
+    let callId: string | undefined;
+    try {
+      const meal = await getMeal(mealId);
+      if (!mealQuestions(meal?.analysis?.clarification).length) return false;
+      const tool = agent.state.tools.find(tool => tool.name === 'answer_meal_question');
+      if (!tool) throw new Error('Meal answer tool is unavailable');
+      answerWasRouted = true;
+      answerError = undefined;
+      if (message) agent.state.messages.push(message);
+      callId = `answer-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const args = {mealId, expectedRevision: meal!.revision};
+      agent.state.messages.push(applicationMessage([{type: 'toolCall', id: callId, name: tool.name, arguments: args}], 'toolUse'));
+      toolExecutions[callId] = {status: 'running', arguments: args};
+      emit();
+      await persist();
+      const result = await tool.execute(callId, args, recoveryAbort.signal);
+      agent.state.messages.push({role: 'toolResult', toolCallId: callId, toolName: tool.name, ...result, isError: false, timestamp: Date.now()});
+      toolExecutions[callId] = {...toolExecutions[callId], status: 'completed'};
+      const next = await getMeal(mealId);
+      const confirmation = confirmationForTurn(agent.state.messages);
+      if (confirmation && !mealQuestions(next?.analysis?.clarification).length) {
+        agent.state.messages.push(applicationMessage([{type: 'text', text: confirmation}], 'stop'));
+      }
+      return true;
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      answerError = text;
+      if (callId) {
+        toolExecutions[callId] = {...toolExecutions[callId], status: recoveryAbort.signal.aborted ? 'cancelled' : 'failed'};
+        agent.state.messages.push({role: 'toolResult', toolCallId: callId, toolName: 'answer_meal_question', isError: true, content: [{type: 'text', text}], timestamp: Date.now()});
+      }
+      throw error;
+    } finally {
+      try {
+        if (callId) {
+          await persist();
+          actions = await listChatActions(input.thread.id);
+          await input.onDataChanged();
+        }
+      } finally { answering = false; emit(); }
+    }
+  };
+
   const session: ChatSession = {
     send: async (text, attachments) => {
-      if (mealActivity || recovering || agent.state.isStreaming) return;
+      if (mealActivity || recovering || answering || agent.state.isStreaming) return;
       await reloadTask;
       const cleanText = text.trim();
       if (!cleanText && attachments.length === 0) return;
@@ -319,6 +383,8 @@ async function createOpenChatSession(input: OpenChatSessionInput, releaseLease: 
         const mealId = input.selectedMealId ?? input.thread.mealId;
         const run = async () => {
           try {
+            if (await answerPendingQuestion(pendingMealId(), message)) return;
+            answerWasRouted = false;
             await agent.prompt(message);
             if (isConnectionError(agent.state.errorMessage)) await retryFailedResponse(true);
           } finally { await input.onDataChanged(); }
@@ -330,9 +396,12 @@ async function createOpenChatSession(input: OpenChatSessionInput, releaseLease: 
       }
     },
     retry: async () => {
-      if (mealActivity || recovering || agent.state.isStreaming) return;
+      if (mealActivity || recovering || answering || agent.state.isStreaming) return;
       recoveryAbort = new AbortController();
-      await retryFailedResponse(false);
+      const last = agent.state.messages.at(-1);
+      if (last?.role === 'toolResult' && last.isError && last.toolName === 'answer_meal_question') {
+        await answerPendingQuestion(pendingMealId());
+      } else await retryFailedResponse(false);
     },
     abort: () => { recoveryAbort.abort(); agent.abort(); },
     close: async () => {

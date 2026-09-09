@@ -134,6 +134,14 @@ export async function latestChatThread(): Promise<ChatThread | undefined> {
   return row ? threadFromRow(row) : undefined;
 }
 
+/** Meal evidence can be spread across its clarification and regular chats.
+ * Preserve each transcript's order, including tool call/result pairs. */
+export async function loadMealChatMessages(mealId: string): Promise<AgentMessage[]> {
+  const threads = (await listChatThreads()).filter(thread => thread.mealId === mealId)
+    .sort((a, b) => a.createdAt - b.createdAt);
+  return (await Promise.all(threads.map(thread => loadChatMessages(thread.id)))).flat();
+}
+
 export async function listChatThreads(): Promise<ChatThread[]> {
   const rows = await database.getAllAsync<ThreadRow>('SELECT * FROM chat_threads ORDER BY updated_at DESC');
   return rows.map(threadFromRow);

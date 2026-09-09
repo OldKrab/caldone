@@ -4,7 +4,7 @@ import type { AgentMessage, AgentTool } from '@earendil-works/pi-agent-core';
 import { Type } from '@earendil-works/pi-ai';
 import { Directory, File, Paths } from 'expo-file-system';
 
-import { getChatToolReceipt, recordChatAction, saveChatToolReceipt } from '../data/chatRepository';
+import { getChatToolReceipt, loadMealChatMessages, recordChatAction, saveChatToolReceipt } from '../data/chatRepository';
 import {
   deleteMealIfRevision,
   getDailyGoals,
@@ -63,6 +63,9 @@ const mealStatusSchema = Type.Union([
 
 export function createCalDoneTools(input: {
   threadId: string;
+  /** Analysis uses the same tools, but its caller commits the final result.
+   * Side effects during inference would survive a failed or cancelled estimate. */
+  deferMutations?: boolean;
   getMessages: () => AgentMessage[];
   attachments: Map<string, ChatAttachment>;
   onDataChanged: () => Promise<void>;
@@ -110,9 +113,24 @@ export function createCalDoneTools(input: {
     {
       name: 'get_meal',
       label: 'View meal',
-      description: 'Get the complete current structured record for one meal. Use view_meal_photos separately when visual inspection is needed.',
+      description: 'Get the complete current record, saved note and original clarification conversation for one meal. User answers and model statements retain their roles. Use view_meal_photos separately for visual inspection.',
       parameters: Type.Object({ mealId: Type.String(), statusText: activitySchema }, { additionalProperties: false }),
-      execute: async (_id, rawParams) => jsonResult(mealForTool(await requiredMeal((rawParams as GetMealParams).mealId))),
+      execute: async (_id, rawParams) => {
+        const meal = await requiredMeal((rawParams as GetMealParams).mealId);
+        const messages = await loadMealChatMessages(meal.id);
+        // Keep testimony separate from model guesses and avoid recursively
+        // embedding old tool results or their nutrition summaries.
+        const conversation = messages.flatMap(message => {
+          if (message.role === 'chatUser') return [{role: 'user', text: message.text}];
+          if (message.role === 'mealQuestion' && message.mealId === meal.id) return [{role: 'assistant', text: message.questions.join('\n')}];
+          if (message.role === 'assistant') {
+            const text = message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n');
+            return text ? [{role: 'assistant', text}] : [];
+          }
+          return [];
+        });
+        return jsonResult({...mealForTool(meal), conversation});
+      },
     },
     {
       name: 'view_meal_photos',
@@ -185,7 +203,7 @@ export function createCalDoneTools(input: {
         note: Type.Optional(Type.String()), items: Type.Array(itemSchema, { minItems: 1 }),
         attachmentIds: Type.Optional(Type.Array(Type.String())), statusText: activitySchema,
       }, { additionalProperties: false }),
-      execute: async (callId, rawParams) => withReceipt(callId, input.threadId, async () => {
+      execute: async (callId, rawParams) => withReceipt(callId, input, async () => {
         const params = rawParams as CreateMealParams;
         const mealId = mealIdForCall(callId);
         const meal = await getMeal(mealId) ?? await createCompleteMeal(mealId, params, input.attachments);
@@ -211,7 +229,7 @@ export function createCalDoneTools(input: {
         items: Type.Optional(Type.Array(itemSchema, { minItems: 1 })), addAttachmentIds: Type.Optional(Type.Array(Type.String())),
         removePhotoIds: Type.Optional(Type.Array(Type.String())), statusText: activitySchema,
       }, { additionalProperties: false }),
-      execute: async (callId, rawParams) => withReceipt(callId, input.threadId, async () => {
+      execute: async (callId, rawParams) => withReceipt(callId, input, async () => {
         const params = rawParams as EditMealParams;
         if (params.portionGrams !== undefined && params.items) throw new Error('Provide either portionGrams or items, not both.');
         if (params.items && mealRequestContext(input.getMessages()).requireSearch) throw new Error("Use reanalyze_meal to research and recalculate the requested nutrition before saving it.");
@@ -251,7 +269,7 @@ export function createCalDoneTools(input: {
         interpretation: Type.Optional(Type.String({ description: 'Assistant interpretation only; original user messages are supplied by the app.' })),
         requireSearch: Type.Optional(Type.Boolean({ description: 'True when the user requests research, including indirect wording.' })), statusText: activitySchema,
       }, { additionalProperties: false }),
-      execute: async (callId, rawParams) => withReceipt(callId, input.threadId, async () => {
+      execute: async (callId, rawParams) => withReceipt(callId, input, async () => {
         const params = rawParams as ReanalyzeMealParams;
         const before = await requiredMeal(params.mealId);
         requireRevision(before, params.expectedRevision);
@@ -277,7 +295,7 @@ export function createCalDoneTools(input: {
         interpretation: Type.Optional(Type.String({ description: 'Assistant interpretation, never a claimed user answer or verified source.' })),
         requireSearch: Type.Optional(Type.Boolean({ description: 'True when the user requests research, including indirect wording.' })), statusText: activitySchema,
       }, { additionalProperties: false }),
-      execute: async (callId, rawParams, signal) => withReceipt(callId, input.threadId, async () => {
+      execute: async (callId, rawParams, signal) => withReceipt(callId, input, async () => {
         const params = rawParams as AnswerQuestionParams;
         const before = await requiredMeal(params.mealId);
         requireRevision(before, params.expectedRevision);
@@ -300,7 +318,7 @@ export function createCalDoneTools(input: {
       description: 'Delete one unambiguous meal only when explicitly asked. Read it first and provide its current revision.',
       executionMode: 'sequential',
       parameters: Type.Object({ mealId: Type.String(), expectedRevision: Type.Number({ minimum: 1 }), statusText: activitySchema }, { additionalProperties: false }),
-      execute: async (callId, rawParams) => withReceipt(callId, input.threadId, async () => {
+      execute: async (callId, rawParams) => withReceipt(callId, input, async () => {
         const params = rawParams as MealMutationParams;
         const before = await requiredMeal(params.mealId);
         requireRevision(before, params.expectedRevision);
@@ -320,7 +338,7 @@ export function createCalDoneTools(input: {
       description: 'Change explicit daily calorie or macro goals only when asked. Null clears a goal; omitted fields stay unchanged.',
       executionMode: 'sequential',
       parameters: Type.Object({ calories: optionalGoal(), protein: optionalGoal(), carbs: optionalGoal(), fat: optionalGoal(), statusText: activitySchema }, { additionalProperties: false }),
-      execute: async (callId, rawParams) => withReceipt(callId, input.threadId, async () => {
+      execute: async (callId, rawParams) => withReceipt(callId, input, async () => {
         const params = rawParams as UpdateGoalsParams;
         const before = await getDailyGoals();
         const next = mergeGoals(before, params);
@@ -348,7 +366,7 @@ export function createCalDoneTools(input: {
         objective: Type.Optional(Type.Union([Type.Literal('lose'), Type.Literal('maintain'), Type.Literal('gain')])),
         statusText: activitySchema,
       }, { additionalProperties: false }),
-      execute: async (callId, rawParams) => withReceipt(callId, input.threadId, async () => {
+      execute: async (callId, rawParams) => withReceipt(callId, input, async () => {
         const params = rawParams as UpdateGoalProfileParams;
         const before = await getGoalProfile();
         const patch = goalProfilePatch(params);
@@ -370,7 +388,7 @@ export function createCalDoneTools(input: {
       description: 'Recalculate and save daily goals from the saved profile only when explicitly asked.',
       executionMode: 'sequential',
       parameters: Type.Object({ statusText: activitySchema }, { additionalProperties: false }),
-      execute: async (callId) => withReceipt(callId, input.threadId, async () => {
+      execute: async (callId) => withReceipt(callId, input, async () => {
         const profile = await getGoalProfile();
         if (!profile) throw new Error('No saved goal profile is available. Ask for the missing profile values.');
         const before = await getDailyGoals();
@@ -463,7 +481,9 @@ function actionResult(actionId: string, label: string, value: unknown) {
   };
 }
 
-async function withReceipt<T>(callId: string, threadId: string, execute: () => Promise<T>): Promise<T> {
+async function withReceipt<T>(callId: string, context: { threadId: string; deferMutations?: boolean }, execute: () => Promise<T>): Promise<T> {
+  if (context.deferMutations) throw new Error('The caller will save this calculation. Return the final meal JSON instead of changing data during analysis.');
+  const { threadId } = context;
   const cached = await getChatToolReceipt(callId, threadId);
   if (cached !== undefined) return cached as T;
   const result = await execute();

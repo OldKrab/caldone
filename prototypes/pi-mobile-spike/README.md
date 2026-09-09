@@ -8,7 +8,7 @@ This directory contains the production CalDone Android app. Its name comes from 
 2. Tap **Add meal** to open the camera directly. Gallery and **Describe meal** are secondary actions on the camera screen; manual nutrition entry is available from the description screen.
 3. Take or choose photos, or describe the meal in text, then start analysis.
 4. Return immediately to the Today screen while CalDone recognizes the complete meal.
-5. Answer any remaining clarification questions if needed. Unanswered clarifications become **Estimated** after 24 hours.
+5. Answer any remaining clarification questions using the choices or by typing in the meal chat. Plain chat text is applied to the open clarification. Unanswered clarifications become **Estimated** after 24 hours.
 
 The Android home-screen widget opens directly into the camera. User-initiated meal analysis acquires an Android foreground service with a quiet notification and a bounded wake lock, allowing processing while other apps are open. WorkManager provides durable recovery after interruption, and returning to the app revisits delayed retries. Requests have a deadline and failures use bounded retries.
 
