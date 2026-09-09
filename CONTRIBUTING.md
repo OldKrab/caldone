@@ -10,7 +10,7 @@ For a misidentified photo, enable **Capture next analysis with photo** in Settin
 
 ## Propose a change
 
-Keep changes focused. Open an issue before a substantial product or architecture change. Use a branch prefixed with `shushakov/`, follow the existing commit style, and include a ticket key when one is in scope. Write release notes in English.
+Keep changes focused. Open an issue before a substantial product or architecture change. Use a descriptive branch name, follow the existing commit style, and include a ticket key when one is in scope. Write release notes in English.
 
 From `mobile/`, run:
 

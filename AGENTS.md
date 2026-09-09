@@ -8,5 +8,5 @@ Before a repository-wide audit or cleanup, establish the checkout's branch, unco
 - Domain terminology or data concepts: read [domain language](docs/domain.md).
 - UI changes: read [design guidance](docs/design.md), including the app-owned [menu and dialog rules](docs/design.md#menus-and-dialogs).
 - Assistant runtime changes: read the [runtime decision](docs/adr/0001-pi-agent-for-assistant-runtime.md).
-- Setup, builds, or releases: read [development guidance](docs/development.md).
-- Preparing changes for review or publication: read [contribution guidance](CONTRIBUTING.md).
+- Setup, testing, builds, or releases: read [development guidance](docs/development.md).
+- Before creating a branch, committing, opening a PR, or publishing: read [contribution guidance](CONTRIBUTING.md).
