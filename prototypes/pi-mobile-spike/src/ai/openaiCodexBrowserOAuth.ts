@@ -150,19 +150,26 @@ async function startCallbackServer(
 
   await CodexLoopback.start(expectedState);
   const codePromise = CodexLoopback.waitForCode();
-  const onAbort = () => CodexLoopback.cancel('Login cancelled');
+  let closed = false;
+  // Browser completion may arrive after this login has finished and another
+  // attempt owns the singleton native listener. Never cancel that new owner.
+  const cancel = (error: Error) => {
+    if (!closed) CodexLoopback.cancel(error.message);
+  };
+  const onAbort = () => cancel(new Error('Login cancelled'));
   const timeout = setTimeout(
-    () => CodexLoopback.cancel('Login callback timed out'),
+    () => cancel(new Error('Login callback timed out')),
     CALLBACK_TIMEOUT_MS,
   );
   signal.addEventListener('abort', onAbort, { once: true });
 
   const close = () => {
+    if (closed) return;
+    closed = true;
     clearTimeout(timeout);
     signal.removeEventListener('abort', onAbort);
     CodexLoopback.close();
   };
-  const cancel = (error: Error) => CodexLoopback.cancel(error.message);
   return { close, cancel, waitForCode: () => codePromise };
 }
 
@@ -171,7 +178,21 @@ function stageError(stage: string, error: unknown): Error {
   return new Error(`${stage}: ${detail}`, { cause: error });
 }
 
+// The native callback server is a singleton; a second caller must not replace
+// the state/verifier belonging to the login already shown in the browser.
+let loginInProgress = false;
+
 async function login(interaction: ProviderAuthInteraction): Promise<OAuthCredential> {
+  if (loginInProgress) throw new Error('Login already in progress');
+  loginInProgress = true;
+  try {
+    return await loginWithBrowser(interaction);
+  } finally {
+    loginInProgress = false;
+  }
+}
+
+async function loginWithBrowser(interaction: ProviderAuthInteraction): Promise<OAuthCredential> {
   interaction.notify({ type: 'progress', message: 'OAuth: creating authorization request' });
   const authorization = await createAuthorizationFlow().catch((error) => {
     throw stageError('OAuth setup failed', error);
@@ -183,13 +204,10 @@ async function login(interaction: ProviderAuthInteraction): Promise<OAuthCredent
   ).catch((error) => {
     throw stageError('OAuth callback listener failed', error);
   });
-  interaction.notify({
-    type: 'auth_url',
-    url: authorization.url,
-    instructions: 'Complete ChatGPT login in the browser.',
-  });
   interaction.notify({ type: 'progress', message: 'OAuth: opening browser' });
 
+  // This adapter owns the browser session. An auth_url event would also make
+  // the provider UI open a regular tab for the same authorization request.
   // Android's auth session observes the CalDone deep link emitted by the
   // callback page and brings the existing activity back to the foreground.
   // The authorization code itself is accepted only by the loopback listener.

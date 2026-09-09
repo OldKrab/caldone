@@ -273,7 +273,9 @@ export async function connectProvider(
     },
     notify: callbacks.onEvent,
   });
-  await SecureStore.setItemAsync(SELECTED_PROVIDER_KEY, providerId);
+  await SecureStore.setItemAsync(SELECTED_PROVIDER_KEY, providerId).catch((error) => {
+    throw new Error('Provider selection save failed', { cause: error });
+  });
 }
 
 async function selectedProviderId(): Promise<string> {
