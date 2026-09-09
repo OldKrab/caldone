@@ -43,3 +43,15 @@ test('a terminal provider event settles observation without waiting for the conn
   const result=await Promise.race([tracked.result(),new Promise(resolve=>setTimeout(()=>resolve('timed out'),50))]);
   assert.notEqual(result,'timed out');
 });
+
+
+test('a mobile SSE response without a content-type still supplies verified search evidence', async () => {
+  const body = 'data: ' + JSON.stringify({type: 'response.completed', response: {id: 'mobile-response', output: [
+    {type: 'web_search_call', id: 'search', status: 'completed', action: {sources: [{url: 'https://example.org/rice', title: 'Rice'}]}},
+  ]}}) + '\n\n';
+  const tracked = trackedSearchFetch(async () => new Response(new TextEncoder().encode(body)));
+  const response = await tracked.fetch('https://provider.test');
+  assert.equal(response.headers.get('content-type'), null);
+  assert.equal(await response.text(), body, 'observation must preserve the provider stream');
+  assert.deepEqual(await tracked.result(), {status: 'completed', responseId: 'mobile-response', sources: [{url: 'https://example.org/rice', title: 'Rice'}]});
+});

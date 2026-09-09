@@ -273,6 +273,7 @@ export async function correctSavedMeal(id: string, correction: string, context?:
       mealId: id,
       previousJson: mealAnalysisEvidenceJson(meal.analysis),
       correction,
+      requireSearch: context?.requireSearch,
       conversation: context?.conversation,
       language: locale === 'ru' ? 'Russian' : 'English',
       onActivity: (activity) => setMealActivity(id, activity),

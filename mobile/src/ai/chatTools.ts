@@ -232,7 +232,7 @@ export function createCalDoneTools(input: {
       execute: async (callId, rawParams) => withReceipt(callId, input, async () => {
         const params = rawParams as EditMealParams;
         if (params.portionGrams !== undefined && params.items) throw new Error('Provide either portionGrams or items, not both.');
-        if (params.items && mealRequestContext(input.getMessages()).requireSearch) throw new Error("Use reanalyze_meal to research and recalculate the requested nutrition before saving it.");
+        if (params.items && mealRequestContext(input.getMessages(), undefined, false, params.mealId).requireSearch) throw new Error("Use reanalyze_meal to research and recalculate the requested nutrition before saving it.");
         const before = await requiredMeal(params.mealId);
         requireRevision(before, params.expectedRevision);
         if (!before.analysis && (params.title || params.mealType || params.items || params.portionGrams !== undefined)) throw new Error('This meal has no nutrition estimate. Reanalyze it or edit only its time, note, or photos.');
@@ -273,7 +273,7 @@ export function createCalDoneTools(input: {
         const params = rawParams as ReanalyzeMealParams;
         const before = await requiredMeal(params.mealId);
         requireRevision(before, params.expectedRevision);
-        const context = mealRequestContext(input.getMessages(), params.interpretation, params.requireSearch);
+        const context = mealRequestContext(input.getMessages(), params.interpretation, params.requireSearch, params.mealId);
         await reanalyzeSavedMeal(before.id, context.userMessages.join("\n"), context);
         const next = await requiredMeal(before.id);
         const action = await recordChatAction({
@@ -300,7 +300,7 @@ export function createCalDoneTools(input: {
         const before = await requiredMeal(params.mealId);
         requireRevision(before, params.expectedRevision);
         if (!before.analysis?.clarification) throw new Error('This meal has no unanswered clarification question.');
-        const context = mealRequestContext(input.getMessages(), params.interpretation, params.requireSearch);
+        const context = mealRequestContext(input.getMessages(), params.interpretation, params.requireSearch, params.mealId);
         await answerMealClarification(before.id, context.userMessages.join("\n"), input.threadId, signal, context);
         const next = await requiredMeal(before.id);
         const action = await recordChatAction({

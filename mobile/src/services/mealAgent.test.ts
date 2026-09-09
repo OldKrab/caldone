@@ -276,3 +276,50 @@ test('successive plain answers consume remaining selectable questions and then r
     assert.equal(snapshots.at(-1).messages.at(-1).content[0].text, 'Пожалуйста!');
   } finally { await session.close(); }
 });
+
+
+test('a failed required search cannot be disabled when the same meal is retried', async () => {
+  const id = 'required-retry';
+  const analysis = {...initial, clarification: undefined};
+  await meals.saveMealRecord({id, revision: 1, capturedAt: Date.now(), status: 'complete', note: initial.title, photos: [], analysis});
+  const thread = await chat.createChatThread({mealId: id, purpose: 'meal'});
+  const messages: any[] = [{role: 'chatUser', text: 'Recalculate with reasonable portions and oil.', timestamp: 1, attachments: []}];
+  const tools = createCalDoneTools({threadId: thread.id, getMessages: () => messages, attachments: new Map(), onDataChanged: async () => {}});
+  const reanalyze = tools.find(tool => tool.name === 'reanalyze_meal')!;
+  const args = {mealId: id, expectedRevision: 1, requireSearch: true};
+  messages.push({role: 'assistant', content: [{type: 'toolCall', id: 'require-first', name: 'reanalyze_meal', arguments: args}]});
+  fixture.enabled = true;
+  fixture.respond = async () => analysis;
+  await assert.rejects(reanalyze.execute('require-first', args), /[Rr]ead.*meal.*again.*web search.*required/);
+  messages.push({role: 'toolResult', toolCallId: 'require-first', toolName: 'reanalyze_meal', isError: true, content: [{type: 'text', text: 'Search could not be verified'}]});
+  const unchanged = await meals.getMeal(id);
+  assert.deepEqual(unchanged!.analysis, analysis, 'failed research must preserve saved nutrition');
+  assert.equal(unchanged!.revision, 3, 'entering and leaving analysis advances the revision');
+  await assert.rejects(reanalyze.execute('require-stale', args), /meal changed.*Read it again/);
+  await assert.rejects(tools.find(tool => tool.name === 'edit_meal')!.execute('bypass-research',
+    {mealId: id, expectedRevision: unchanged!.revision, items: analysis.items}), /research and recalculate/);
+
+  await assert.rejects(reanalyze.execute('require-retry', {mealId: id, expectedRevision: unchanged!.revision, requireSearch: false}), /search could not be verified/);
+  fixture.respond = async () => [
+    {type: 'web_search_call', id: 'verified-search', status: 'completed', action: {sources: [{url: 'https://source.test/nutrition', title: 'Nutrition'}]}},
+    {type: 'message', id: 'verified-estimate', status: 'completed', role: 'assistant', content: [{type: 'output_text', text: JSON.stringify(analysis), annotations: []}]},
+  ];
+  const current = await meals.getMeal(id);
+  const result: any = await reanalyze.execute('require-verified', {mealId: id, expectedRevision: current!.revision, requireSearch: false});
+  assert.equal(result.details.value.research.status, 'completed');
+  assert.match(result.details.value.confirmation, /https:\/\/source.test\/nutrition/);
+
+});
+
+
+test('required research is preserved when reanalysis falls back to a manually entered meal', async () => {
+  const id = 'manual-research';
+  await meals.saveMealRecord({id, revision: 1, capturedAt: Date.now(), status: 'complete', note: '', photos: [], analysis: {...initial, clarification: undefined}});
+  const thread = await chat.createChatThread({mealId: id, purpose: 'meal'});
+  const tools = createCalDoneTools({threadId: thread.id, attachments: new Map(), onDataChanged: async () => {},
+    getMessages: () => [{role: 'chatUser', text: 'Recalculate with reasonable portions.', timestamp: 1, attachments: []}]});
+  fixture.enabled = true;
+  fixture.respond = async () => ({...initial, clarification: undefined});
+  await assert.rejects(tools.find(tool => tool.name === 'reanalyze_meal')!.execute('manual-required',
+    {mealId: id, expectedRevision: 1, requireSearch: true, interpretation: 'Use typical portions'}), /search could not be verified/);
+});

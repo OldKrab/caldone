@@ -3,7 +3,7 @@ import type { MealResearch } from '../domain/mealResearch.ts';
 export class MealResearchError extends Error {
   readonly research: MealResearch;
   constructor(research: MealResearch) {
-    super('The requested web search could not be verified. The meal was not changed. Please retry.');
+    super('The requested web search could not be verified. The saved nutrition was not changed. Read the meal again before retrying with web search still required.');
     this.research = research;
   }
 }
