@@ -79,3 +79,13 @@ Use `ADB` or `ANDROID_HOME` to locate adb and `ANDROID_SERIAL` to select a devic
 Run with the app in English or Russian, in both gesture and three-button navigation,
 at normal and enlarged font sizes. Also dismiss the keyboard and verify that the
 composer returns above the app navigation. Keep evidence in ignored `artifacts/`.
+
+## Dialog message regression
+
+On an Android build, open Settings → App updates → Check for updates when no newer release is available. With the short result dialog open, run from `mobile/`:
+
+```sh
+node scripts/check-app-dialog.mjs 'У вас последняя совместимая версия.' 'Закрыть'
+```
+
+Pass the displayed message and action in the current app language. Use `ADB` or `ANDROID_HOME` to locate adb and `ANDROID_SERIAL` to select a device. The check saves a screenshot and native hierarchy, then verifies that a scroll gesture cannot reveal clipped text in the short notice. Run at normal and enlarged font sizes; separately verify that long release notes scroll while the action rows stay visible.

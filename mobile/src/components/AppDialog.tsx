@@ -78,7 +78,9 @@ export function useAppDialog(): AppDialogController {
 
 const styles = StyleSheet.create({
   backdrop: { backgroundColor: 'rgba(30, 33, 38, 0.58)', flex: 1, justifyContent: 'flex-end' },
-  safeArea: { alignItems: 'center', justifyContent: 'flex-end', padding: space.md },
+  // The sheet's percentage height needs a screen-sized parent; an auto-height
+  // parent shrinks even short notices and clips their message behind the actions.
+  safeArea: { flex: 1, alignItems: 'center', justifyContent: 'flex-end', padding: space.md },
   sheet: {
     backgroundColor: color.surface,
     borderRadius: radius.surface,
