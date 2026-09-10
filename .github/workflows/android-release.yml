@@ -50,8 +50,30 @@ jobs:
           npm run check
           npm test
 
+      - name: Check release identity and authored notes
+        id: release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const version = require('./app.json').expo.version;
+          if (!/^\d+\.\d+\.\d+$/.test(version) || process.env.GITHUB_REF_NAME !== `v${version}`) {
+            throw new Error('Release tag must match the Expo version');
+          }
+          const path = `docs/releases/${version}.md`;
+          const notes = fs.readFileSync(`../${path}`, 'utf8');
+          const title = /^# ([^\n]+)\n\n\S/.exec(notes)?.[1];
+          if (!title || title.length > 100 || /^v?\d+\.\d+\.\d+$/.test(title)) {
+            throw new Error('Release notes need a short, benefit-led heading and an opening summary');
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `title=${title}\nnotes=${path}\n`);
+          NODE
+
       - name: Generate native Android project
         run: npx expo prebuild --platform android --no-install
+
+      - name: Test Android update validation
+        run: ./android/gradlew -p android :caldone-updates:testDebugUnitTest --console=plain
 
       - name: Restore release signing key
         env:
@@ -132,4 +154,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.artifact.outputs.path }}
-          generate_release_notes: true
+          name: ${{ steps.release.outputs.title }}
+          body_path: ${{ steps.release.outputs.notes }}

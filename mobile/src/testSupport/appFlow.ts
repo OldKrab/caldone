@@ -16,6 +16,7 @@ export function appFlow() {
   const subscription = '() => ({ remove() {} })';
   const overrides: Record<string, string> = {
     useAppDialog: '() => ({ alert() {}, confirm: async () => true })',
+    useAppUpdates: '() => ({ installedVersion: "test" })',
     useSafeAreaInsets: '() => ({ top: 0, bottom: 0, left: 0, right: 0 })',
     StyleSheet: '{ create: value => value, hairlineWidth: 1 }',
     Pressable: 'props => typeof props.children === "function" ? props.children({ pressed: false }) : props.children',

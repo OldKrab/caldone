@@ -1,4 +1,3 @@
-import appConfig from '../../../app.json';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import {
@@ -22,11 +21,15 @@ import type { DailyGoals } from '../../domain/meal';
 import type { NotificationPreferences, NutritionUnits } from '../../domain/preferences';
 import { formatNumber, locale, t, type Locale } from '../../i18n';
 import { SetupScreen } from '../onboarding/SetupScreen';
+import { UpdateSettings } from './UpdateSettings';
+import type { AppUpdates } from './useAppUpdates';
 
-type SettingsPage = 'root' | 'goals' | 'goal_calculator' | 'units' | 'notifications' | 'language' | 'privacy' | 'about';
+type SettingsPage = 'root' | 'goals' | 'goal_calculator' | 'units' | 'notifications' | 'language' | 'privacy' | 'about' | 'updates';
 type GoalField = keyof DailyGoals;
 
 export function SettingsScreen(props: {
+  updates: AppUpdates;
+  onUpdateSafetyChange: (safe: boolean) => void;
   goals: DailyGoals;
   goalProfile?: GoalProfile;
   units: NutritionUnits;
@@ -51,6 +54,10 @@ export function SettingsScreen(props: {
 }) {
   const [page, setPage] = useState<SettingsPage>('root');
   const goBack = () => page === 'root' ? props.onBack() : setPage('root');
+  useEffect(() => {
+    props.onUpdateSafetyChange(['root', 'about', 'updates'].includes(page));
+    return () => props.onUpdateSafetyChange(false);
+  }, [page, props.onUpdateSafetyChange]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -102,8 +109,13 @@ export function SettingsScreen(props: {
             onIncludePhotos={props.onIncludePhotosInExport}
             onRemoveAllPhotos={props.onRemoveAllPhotos}
           />
+        ) : page === 'updates' ? (
+          <ScrollView contentContainerStyle={styles.content}>
+            <SettingsHeader title={t('appUpdates')} onBack={goBack} />
+            <UpdateSettings updates={props.updates} />
+          </ScrollView>
         ) : (
-          <AboutPage onBack={goBack} />
+          <AboutPage onBack={goBack} version={props.updates.installedVersion} />
         )}
       </ScreenReveal>
     </KeyboardSafeArea>
@@ -128,7 +140,8 @@ function SettingsHub(props: Parameters<typeof SettingsScreen>[0] & {
       <SettingsSection title={t('appSection')}>
         <SettingsLink label={t('language')} value={props.locale === 'ru' ? 'Русский' : 'English'} onPress={() => props.onOpen('language')} />
         <SettingsLink label={t('dataPrivacy')} value={t('photosKeptWithMeals')} onPress={() => props.onOpen('privacy')} />
-        <SettingsLink label={t('aboutCaldone')} value={t('versionLabel', { version: appConfig.expo.version })} onPress={() => props.onOpen('about')} />
+        <SettingsLink label={t('appUpdates')} value={props.updates.result?.release ? t('versionLabel', { version: props.updates.result.release.version }) : t('updateCheck')} onPress={() => props.onOpen('updates')} />
+        <SettingsLink label={t('aboutCaldone')} value={t('versionLabel', { version: props.updates.installedVersion })} onPress={() => props.onOpen('about')} />
       </SettingsSection>
     </ScrollView>
   );
@@ -331,7 +344,7 @@ function PrivacyPage(props: { includePhotos: boolean; importing: boolean; onBack
   );
 }
 
-function AboutPage(props: { onBack: () => void }) {
+function AboutPage(props: { onBack: () => void; version: string }) {
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <SettingsHeader title={t('aboutCaldone')} onBack={props.onBack} />
@@ -339,7 +352,7 @@ function AboutPage(props: { onBack: () => void }) {
       <Text selectable style={styles.aboutTitle}>CalDone</Text>
       <Text selectable style={styles.aboutCopy}>{t('aboutBody')}</Text>
       <View style={styles.formPanel}>
-        <InfoRow label={t('version')} value={appConfig.expo.version} />
+        <InfoRow label={t('version')} value={props.version} />
         <InfoRow label={t('openSource')} value="CalDone" />
         <InfoRow label={locale === 'ru' ? 'Лицензия' : 'License'} value="MIT" />
       </View>
