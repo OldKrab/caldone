@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { color, radius, space, type } from '../design/tokens';
@@ -34,10 +34,10 @@ export function AppDialogProvider(props: { children: ReactNode }) {
           <SafeAreaView edges={['left', 'right', 'bottom']} pointerEvents="box-none" style={styles.safeArea}>
             {dialog && (
               <View style={styles.sheet}>
-                <View style={styles.heading}>
+                <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={styles.heading}>
                   <Text selectable accessibilityRole="header" style={styles.title}>{dialog.title}</Text>
                   {dialog.message ? <Text selectable style={styles.message}>{dialog.message}</Text> : null}
-                </View>
+                </ScrollView>
                 <View style={styles.actions}>
                   {dialog.actions.map((action, index) => (
                     <Pressable

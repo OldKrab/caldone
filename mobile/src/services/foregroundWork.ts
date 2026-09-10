@@ -16,3 +16,4 @@ export const beginForegroundWork = async () => {
   return work.acquire();
 };
 export const foregroundWorkActive = work.active;
+export const foregroundWorkBusy = work.busy;

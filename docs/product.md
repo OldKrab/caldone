@@ -30,6 +30,14 @@ OpenAI Codex is the implemented provider. Barcode scanning, health-platform sync
 4. Keep changes to the user's records inspectable and tied to their request.
 5. Never invent adoption, nutrition accuracy, research, or validation claims.
 
+## App updates (#51)
+
+- Automatic update checks are enabled by default and run when CalDone opens or returns to the foreground, at most once per eight hours. Settings also offers a manual check.
+- Discovering an update does not download it. Every download requires an explicit **Download and install** action. Android always asks the user to confirm installation.
+- Offer each stable release once in a dismissible `AppDialog` when Today is idle. Show its version, download size, release highlights, and Download and install, Full release notes, and Later actions. After dismissal, the update remains available in Settings.
+- The update panel should make the release interesting to read and explain why it matters to the user. Follow the [release-writing guidance](development.md#release-writing).
+- Operational copy is available in English and Russian; authored release titles, headings, and notes stay in English.
+
 ## Identity and references
 
 The product name is **CalDone**. The production Android application is `mobile/`; its design guidance is in [design.md](design.md), and shared terminology is in [domain.md](domain.md). The current launcher artwork and provenance live in `mobile/assets/`.

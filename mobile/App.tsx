@@ -1,7 +1,8 @@
 import appConfig from './app.json';
 import { mealRequestDiagnostics } from './src/services/mealRequestTraceStore';
 import { submitMealAnswer, subscribeMealAnswers } from './src/services/mealAnswerSubmission';
-import { foregroundWorkActive } from './src/services/foregroundWork';
+import { foregroundWorkActive, foregroundWorkBusy } from './src/services/foregroundWork';
+import { useAppUpdates } from './src/features/settings/useAppUpdates';
 import { DescribeMealScreen } from './src/features/capture/DescribeMealScreen';
 import { hasMealInput } from './src/ai/mealInput';
 import { addDishToMeal } from './src/services/mealAddition';
@@ -141,6 +142,27 @@ function CalDoneApp() {
 
   useEffect(() => subscribeMealActivity(setMealActivities), []);
   const [answeringMealIds, setAnsweringMealIds] = useState<ReadonlySet<string>>(new Set());
+  const dataWork = useRef(0);
+  const settingsSafe = useRef(false);
+  const updateSettingsSafety = useCallback((safe: boolean) => { settingsSafe.current = safe; }, []);
+  // Home and read-only Settings pages have no local editor drafts. Recheck at
+  // both download completion and system confirmation; work can start meanwhile.
+  const updateIdle = () => ready && !showSetup && AppState.currentState === 'active'
+    && !sending && !sendInFlight.current && !importingData && !savingGoals && dataWork.current === 0
+    && photos.length === 0 && !note.trim() && !manualMeal && !additionMealId
+    && mealActivities.size === 0 && answeringMealIds.size === 0 && !foregroundWorkBusy()
+    && !meals.some(meal => meal.status === 'analyzing');
+  const updates = useAppUpdates({
+    ready,
+    canPrompt: () => authenticated && screen === 'home' && updateIdle(),
+    canInstall: () => authenticated
+      && (screen === 'home' || (screen === 'settings' && settingsSafe.current))
+      && updateIdle(),
+  });
+  const runDataWork = async (action: () => Promise<void>) => {
+    dataWork.current++;
+    try { await action(); } finally { dataWork.current--; }
+  };
   useEffect(() => subscribeMealAnswers(setAnsweringMealIds), []);
   useEffect(() => {
     if (!ready) return;
@@ -642,6 +664,7 @@ function CalDoneApp() {
   };
 
   const performImport = async (backup: ReturnType<typeof parseCalDoneBackup>) => {
+    dataWork.current++;
     setImportingData(true);
     try {
       const result = await mergeCalDoneBackup(backup);
@@ -670,6 +693,7 @@ function CalDoneApp() {
       showInfo(t('importFailedTitle'), t('importFailedBody'));
     } finally {
       setImportingData(false);
+      dataWork.current--;
     }
   };
 
@@ -838,6 +862,8 @@ function CalDoneApp() {
       <>
       <StatusBar style="dark" />
       <SettingsScreen
+        updates={updates}
+        onUpdateSafetyChange={updateSettingsSafety}
         goals={goals}
         goalProfile={goalProfile}
         includePhotosInExport={includePhotosInExport}
@@ -848,13 +874,13 @@ function CalDoneApp() {
         units={units}
         onBack={() => setScreen('home')}
         onChangeLocale={persistLocale}
-        onDeleteAllMeals={removeAllSavedMeals}
-        onExport={exportData}
-        onImport={importData}
-        onExportDiagnostics={exportDiagnostics}
+        onDeleteAllMeals={() => runDataWork(removeAllSavedMeals)}
+        onExport={() => runDataWork(exportData)}
+        onImport={() => runDataWork(importData)}
+        onExportDiagnostics={() => runDataWork(exportDiagnostics)}
         onIncludePhotosInExport={persistExportPhotos}
         onManageProvider={() => setScreen('providers')}
-        onRemoveAllPhotos={removeSavedPhotos}
+        onRemoveAllPhotos={() => runDataWork(removeSavedPhotos)}
         onSaveGoalSetup={persistGoalSetup}
         onSaveGoals={persistGoals}
         onSaveNotifications={persistNotifications}
