@@ -251,10 +251,6 @@ export function AssistantScreen(props: {
     try {
       await props.onUndo(actionId);
       await props.onDataChanged();
-      setSnapshot((current) => ({
-        ...current,
-        actions: current.actions.map((action) => action.id === actionId ? { ...action, undone: true } : action),
-      }));
     } catch {
       dialog.show({ title: t('undoUnavailable'), actions: [{ label: t('close'), role: 'cancel' }] });
     } finally {
@@ -620,12 +616,13 @@ function toolActivityLabel(name: string, args: Record<string, unknown>): string 
 function ActionRow(props: { action: ChatAction; busy: boolean; onUndo: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const details = actionDetails(props.action, locale);
+  const label = props.action.undone ? t('actionUndone', { action: props.action.label }) : props.action.label;
   return (
     <View style={styles.actionReceipt}>
       <View style={styles.actionRow}>
-        <Pressable accessibilityRole="button" accessibilityLabel={`${props.action.label}. ${locale === 'ru' ? 'Что изменилось' : 'What changed'}`} accessibilityState={{ expanded }} onPress={() => setExpanded(!expanded)} style={styles.receiptToggle}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`${label}. ${locale === 'ru' ? 'Что изменилось' : 'What changed'}`} accessibilityState={{ expanded }} onPress={() => setExpanded(!expanded)} style={styles.receiptToggle}>
           <Ionicons name={props.action.undone ? 'arrow-undo-outline' : 'checkmark'} size={17} color={props.action.undone ? color.muted : color.action} />
-          <View style={{ flex: 1 }}><Text style={[styles.actionLabel, props.action.undone && styles.actionUndone]}>{props.action.label}</Text><Text style={styles.receiptHint}>{locale === 'ru' ? 'Что изменилось' : 'What changed'}{details.length > 0 ? ` · ${details.length}` : ''}</Text></View>
+          <View style={{ flex: 1 }}><Text style={[styles.actionLabel, props.action.undone && styles.actionUndone]}>{label}</Text><Text style={styles.receiptHint}>{locale === 'ru' ? 'Что изменилось' : 'What changed'}{details.length > 0 ? ` · ${details.length}` : ''}</Text></View>
           <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={color.action} />
         </Pressable>
         {!props.action.undone && props.action.canUndo !== false && <Pressable accessibilityRole="button" accessibilityState={{ disabled: props.busy }} disabled={props.busy} onPress={props.onUndo} style={styles.receiptUndo}><Text style={styles.undo}>{props.busy ? t('undoing') : t('undo')}</Text></Pressable>}

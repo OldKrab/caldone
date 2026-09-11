@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { setMealActivity } from './mealActivity.ts';
 
 // Substitute native storage and provider boundaries, retaining the real session lifecycle.
-const fixture = { messages: [{ role: 'chatUser', text: 'Everything shown', attachments: [], timestamp: 1 }] as any[], saved: [] as any[], prompts: 0, failPrompt: false, continued: [] as any[] };
+const fixture = { messages: [{ role: 'chatUser', text: 'Everything shown', attachments: [], timestamp: 1 }] as any[], saved: [] as any[], prompts: 0, failPrompt: false, continued: [] as any[], actions: [] as any[], meal: undefined as any };
 (globalThis as any).__inlineFixture = fixture;
 const sources: Record<string, string> = {
   './foregroundRecovery': 'export const waitForConnectionRecovery=async()=>{};',
@@ -28,11 +28,11 @@ const sources: Record<string, string> = {
   '../ai/chatTools': 'export const createCalDoneTools=()=>[];',
   '../ai/chatPrompt': 'export const buildChatPrompt=()=>""; export const CHAT_PROMPT_VERSION="test";',
   '../data/chatRepository': `export const loadChatMessages=async()=>[...globalThis.__inlineFixture.messages];
-    export const listChatActions=async()=>[]; export const sanitizeChatMessage=x=>x;
+    export const listChatActions=async()=>structuredClone(globalThis.__inlineFixture.actions); export const sanitizeChatMessage=x=>x;
     export const saveChatMessages=async(_id,messages)=>{globalThis.__inlineFixture.saved=messages};
-    export const getChatAction=async()=>null; export const markChatActionUndone=async()=>{};
+    export const getChatAction=async(id)=>structuredClone(globalThis.__inlineFixture.actions.find(a=>a.id===id)); export const markChatActionUndone=async(id)=>{globalThis.__inlineFixture.actions.find(a=>a.id===id).undone=true};
     export const renameChatThread=async()=>{};`,
-  '../data/mealRepository': ['appendDiagnosticEvent','deleteMeal','getDailyGoals','getGoalProfile','getMeal','getPreference','removePreference','replaceMeal','saveDailyGoals','saveGoalProfile'].map(n=>`export const ${n}=async()=>null;`).join('\n'),
+  '../data/mealRepository': ['appendDiagnosticEvent','deleteMeal','getDailyGoals','getGoalProfile','getPreference','removePreference','saveDailyGoals','saveGoalProfile'].map(n=>`export const ${n}=async()=>null;`).join('\n') + `export const getMeal=async()=>structuredClone(globalThis.__inlineFixture.meal); export const replaceMeal=async(meal)=>{globalThis.__inlineFixture.meal=structuredClone(meal)};`,
   '../i18n': 'export const locale="en";',
 };
 const hooks = registerHooks({ resolve(specifier, context, next) {
@@ -43,7 +43,7 @@ const hooks = registerHooks({ resolve(specifier, context, next) {
   }
   return next(specifier,context);
 }});
-const { openChatSession } = await import('./chatSession.ts');
+const { openChatSession, undoAssistantAction } = await import('./chatSession.ts');
 
 test('opening chat during an inline answer shows meal work and reloads subsequent questions', async () => {
   setMealActivity('meal-inline', 'reviewing_meal');
@@ -142,4 +142,27 @@ test('completed analysis replies use the app receipt before display and diagnost
     (fixture as any).listener({type:'message_end',message});
     assert.deepEqual(message.content,[{type:'text',text:'Recorded estimate. Web search was unavailable.'}]);
   } finally { await session.close(); }
+});
+
+
+test('undo restores the meal and stays undone through later messages and reopening chat', async () => {
+  fixture.messages=[];
+  const before={id:'oats',photos:[],analysis:{totals:{calories:190,protein:7,carbs:30,fat:4},items:[{name:'Rolled oats',quantity:'50 g'}]}};
+  fixture.meal={...before,analysis:{totals:{calories:97,protein:3.5,carbs:15,fat:2},items:[{name:'Rolled oats',quantity:'25 g'},{name:'Black coffee',quantity:'200 ml'}]}};
+  fixture.actions=[{id:'undo-oats',threadId:'thread-undo',label:'Updated breakfast',createdAt:1,undone:false,undo:{kind:'restore_meal',meal:before,expectedMeal:structuredClone(fixture.meal)}}];
+  const snapshots:any[]=[];
+  const input={thread:{id:'thread-undo',title:'Meal',createdAt:1,updatedAt:1},onChanged:(s:any)=>snapshots.push(s),onDataChanged:async()=>{}};
+  const session=await openChatSession(input);
+  try {
+    await undoAssistantAction('undo-oats');
+    assert.deepEqual(fixture.meal,before);
+    assert.equal(snapshots.at(-1).actions[0].undone,true,'the subscribed screen must immediately observe completed undo');
+    (fixture as any).listener({type:'message_start',message:{role:'assistant',content:[]}});
+    assert.equal(snapshots.at(-1).actions[0].undone,true,'later messages must not restore the Undo button');
+    await undoAssistantAction('undo-oats');
+    assert.deepEqual(fixture.meal,before,'repeating undo must leave restored nutrition intact');
+  } finally {await session.close();}
+  const reopened=await openChatSession(input);
+  try {assert.equal(snapshots.at(-1).actions[0].undone,true);}
+  finally {await reopened.close();fixture.actions=[];}
 });

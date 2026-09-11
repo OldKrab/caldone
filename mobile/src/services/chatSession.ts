@@ -61,6 +61,7 @@ type RetainedSession = {
   session: ChatSession;
   listeners: Set<OpenChatSessionInput['onChanged']>;
   snapshot?: ChatSessionSnapshot;
+  undoneActionIds: Set<string>;
   running: boolean;
   publish(): void;
   disposeIfIdle(): Promise<void>;
@@ -110,10 +111,13 @@ async function createRetainedSession(input: OpenChatSessionInput): Promise<Retai
   let disposed = false;
   const entry: RetainedSession = {
     session: undefined as unknown as ChatSession,
-    listeners: new Set(), running: false,
+    listeners: new Set(), running: false, undoneActionIds: new Set(),
     publish() {
       if (entry.snapshot) for (const listener of entry.listeners) {
-        listener({ ...entry.snapshot, busy: entry.running || entry.snapshot.busy });
+        // Undo is durable and cannot be reversed by an older in-flight action reload.
+        listener({ ...entry.snapshot,
+          actions: entry.snapshot.actions.map(action => entry.undoneActionIds.has(action.id) ? { ...action, undone: true } : action),
+          busy: entry.running || entry.snapshot.busy });
       }
     },
     async disposeIfIdle() {
@@ -479,6 +483,12 @@ export async function undoAssistantAction(actionId: string): Promise<void> {
     else await removePreference('goal_profile');
   }
   await markChatActionUndone(action.id);
+  const pending = retainedSessions.get(action.threadId);
+  if (pending) {
+    const entry = await pending;
+    entry.undoneActionIds.add(action.id);
+    entry.publish();
+  }
 }
 
 function sameValue(left: unknown, right: unknown): boolean {
