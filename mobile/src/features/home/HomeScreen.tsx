@@ -13,6 +13,7 @@ import type { MealActivityStage } from '../../services/mealActivity';
 
 export function HomeScreen(props: {
   answeringMealIds?: ReadonlySet<string>;
+  failedDishAdditionIds?: ReadonlySet<string>;
   meals: Meal[];
   activities: ReadonlyMap<string, MealActivityStage>;
   goals: DailyGoals;
@@ -223,6 +224,7 @@ export function HomeScreen(props: {
                             : meal.analysis ? `${formatNumber(displayEnergy(meal.analysis.totals.calories, props.units))} ${unit}` : '—'}
                         </Text>
                       </View>
+                      {props.failedDishAdditionIds?.has(meal.id) && <Text style={styles.working}>{t('dishNotAdded')}</Text>}
                       {!working && (meal.status === 'needs_input' || meal.status === 'failed') && <Text style={styles.working}>{meal.status === 'failed' ? t('failed') : ru ? 'Предварительно · нужно уточнение' : 'Provisional · needs clarification'}</Text>}
                       {!working && meal.analysis && <Text style={styles.mealMacros}>
                         {(['protein', 'carbs', 'fat'] as const).map((key) => `${ru ? ({ protein: 'Б', carbs: 'У', fat: 'Ж' }[key]) : ({ protein: 'P', carbs: 'C', fat: 'F' }[key])} ${formatNumber(displayWeight(meal.analysis!.totals[key], props.units))} ${props.units.weight === 'oz' ? t('ounces') : t('grams')}`).join(' · ')}

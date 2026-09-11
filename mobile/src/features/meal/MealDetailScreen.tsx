@@ -1,3 +1,4 @@
+import type { DishAdditionState } from '../../services/backgroundDishAddition';
 import { MealWebImage } from '../../components/MealWebImage';
 import { MealProgress } from '../../components/MealProgress';
 import { QuestionAnswers } from '../../components/QuestionAnswers';
@@ -38,6 +39,10 @@ const nutritionFields = ['calories', 'protein', 'carbs', 'fat'] as const;
 type NutritionField = typeof nutritionFields[number];
 
 export function MealDetailScreen(props: {
+  dishAddition?: DishAdditionState;
+  onStopDishAddition?: () => void;
+  onRetryDishAddition?: () => void;
+  onDiscardDishAddition?: () => void;
   answerSubmitting?: boolean;
   meal: Meal;
   activity?: MealActivityStage;
@@ -59,7 +64,7 @@ export function MealDetailScreen(props: {
   const [time, setTime] = useState(editableTime(props.meal.capturedAt));
   const [answering, setAnswering] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
-  const working = reanalyzing || answering || props.answerSubmitting || Boolean(props.activity) || props.meal.status === 'queued' || props.meal.status === 'analyzing';
+  const working = props.dishAddition?.status === 'running' || reanalyzing || answering || props.answerSubmitting || Boolean(props.activity) || props.meal.status === 'queued' || props.meal.status === 'analyzing';
 
   const reanalyze = async () => {
     if (working) return;
@@ -126,7 +131,7 @@ export function MealDetailScreen(props: {
   const bottomActions = !editing && !props.creating && (
     <View style={styles.actionsDock}>
       <PrimaryButton icon="chatbubble-outline" label={t('editOrDiscuss')} onPress={props.onAskAssistant} />
-      <PrimaryButton icon="add" label={t('addDish')} variant="outlined" disabled={!canAddDish(props.meal) || working} onPress={props.onAddDish} />
+      <PrimaryButton icon="add" label={t('addDish')} variant="outlined" disabled={!canAddDish(props.meal) || working || Boolean(props.dishAddition)} onPress={props.onAddDish} />
     </View>
   );
 
@@ -172,7 +177,16 @@ export function MealDetailScreen(props: {
           </View>}
         </View>}
 
-        {!editing && working && <MealProgress mealId={props.meal.id} stage={props.activity} compact label={t('analyzing')} />}
+        {!editing && working && <MealProgress mealId={props.meal.id} stage={props.activity} compact label={t(props.dishAddition ? 'backgroundDishWorking' : 'analyzing')} />}
+        {!editing && props.dishAddition?.status === 'running' && <Text selectable style={styles.noteText}>{t('addingDish')}</Text>}
+        {!editing && props.dishAddition?.status === 'running' && <PrimaryButton label={t('stop')} variant="outlined" onPress={() => props.onStopDishAddition?.()} />}
+        {!editing && props.dishAddition?.status === 'failed' && <View style={styles.noteBlock}>
+          <Text selectable accessibilityLiveRegion="polite" style={styles.error}>{t('backgroundDishError')}</Text>
+          {[t('addDishChanged'), t('addDishNotReady')].includes(props.dishAddition.error ?? '') && <Text selectable style={styles.noteText}>{props.dishAddition.error}</Text>}
+          <PrimaryButton label={t('retry')} onPress={() => props.onRetryDishAddition?.()} />
+          <PrimaryButton label={t('cancel')} variant="outlined" onPress={() => props.onDiscardDishAddition?.()} />
+        </View>}
+
         {!editing && !working && props.meal.status === 'needs_input' && <Text selectable style={styles.clarificationActivity}>{locale === 'ru' ? 'Предварительная оценка · ожидает уточнения' : 'Provisional estimate · awaiting clarification'}</Text>}
         {!editing && !working && props.meal.status === 'failed' && <Text selectable style={styles.error}>{locale === 'ru' ? 'Пересчёт не завершён. Ниже — предыдущая оценка.' : 'Update failed. The previous estimate is shown below.'}</Text>}
         {!editing && mealQuestions(draft.clarification).length > 0 && (
@@ -204,7 +218,7 @@ export function MealDetailScreen(props: {
             <MealEditor draft={draft} time={time} onChange={setDraft} onTimeChange={setTime} />
           </>
         ) : (
-          <MealOverview meal={props.meal} analysis={draft} units={props.units} hideNutrition={Boolean(working)} />
+          <MealOverview meal={props.meal} analysis={draft} units={props.units} hideNutrition={Boolean(working && props.dishAddition?.status !== 'running')} />
         )}
 
         {error ? <Text selectable accessibilityRole="alert" style={styles.error}>{error}</Text> : null}

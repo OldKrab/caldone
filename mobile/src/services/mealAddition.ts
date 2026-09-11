@@ -1,3 +1,4 @@
+import type { MealActivityStage } from './mealActivity';
 import { File } from 'expo-file-system';
 import { analyzeMeal } from '../ai/piClient';
 import { hasMealInput } from '../ai/mealInput';
@@ -13,7 +14,7 @@ const adding = new Set<string>();
  * stale request leaves the original meal intact and the draft available to retry.
  * No pending meal status is written: restart recovery must never analyze the
  * original evidence as if it were the new dish. */
-export async function addDishToMeal(id: string, input: { photos: MealPhoto[]; note: string; signal?: AbortSignal }): Promise<void> {
+export async function addDishToMeal(id: string, input: { photos: MealPhoto[]; note: string; signal?: AbortSignal; onActivity?: (stage: MealActivityStage) => void }): Promise<void> {
   if (adding.has(id)) throw new Error(t('analysisAlreadyRunning'));
   if (!hasMealInput(input)) throw new Error(t('addDishError'));
   adding.add(id);
@@ -26,15 +27,17 @@ export async function addDishToMeal(id: string, input: { photos: MealPhoto[]; no
     const photos = await Promise.all(input.photos.map(async photo => ({
       base64: await new File(photo.uri).base64(), mimeType: photo.mimeType,
     })));
+    input.onActivity?.('thinking');
     const result = await analyzeMeal({
       mealId: id, photos, note: input.note, existingMeal: meal.analysis,
-      signal: input.signal,
+      signal: input.signal, onActivity: input.onActivity,
       language: locale === 'ru' ? 'Russian' : 'English',
     });
     const analysis = parseMealAnalysis(result.text);
     if (!analysis.items.length) throw new Error(t('addDishError'));
     const updated = appendMealDish(meal, { ...input, analysis });
     input.signal?.throwIfAborted();
+    input.onActivity?.('saving_result');
     if (!await replaceMealIfRevision(updated, meal.revision)) throw new Error(t('addDishChanged'));
   } finally {
     adding.delete(id);
