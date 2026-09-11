@@ -25,6 +25,22 @@ bash scripts/build-android.sh
 
 The APK is written to `artifacts/caldone-<version>-arm64.apk` at the repository root. Local builds use the generated development signing key; builds made on another machine may not update an official installation. GitHub releases use the configured release signing key.
 
+## Native UI screenshots
+
+Use a hardware-accelerated Android emulator or connected device for visual review. On Linux, check access to `/dev/kvm`; if the user belongs to `kvm` but the current session predates that membership, `sg kvm` can start the emulator with the new group. Check the host environment when a sandbox hides devices or blocks ADB sockets. Keep machine-specific SDK paths and AVD names in the ignored `AGENTS.local.md` referenced by root `AGENTS.md`.
+
+Prefer an existing compatible development app with Metro for UI-only changes. Before capturing, run `adb devices -l`, select the intended serial explicitly, and confirm `adb -s SERIAL shell getprop sys.boot_completed` returns `1`. An ADB connection alone does not mean Android's package and window services are ready.
+
+For isolated layout review, a local harness may render the production React Native components with synthetic data and inert external actions. Keep the harness and generated assets in ignored directories, disclose that it is a harness, and do not count its screenshots as verification of navigation, persistence, authentication, or AI processing. Preserve existing emulator data and installations; do not wipe a device to get a screenshot.
+
+Capture the actual Android screen:
+
+```sh
+adb -s SERIAL exec-out screencap -p > artifacts/TASK/SCREEN.png
+```
+
+Review the captured images before sharing. Include relevant open menus and dialogs, and check localized copy and enlarged text when the change affects them. Restore any changed device settings afterward. Edited images and browser previews must be labeled as mockups, never as native verification.
+
 ## Releases
 
 [Android release CI](../.github/workflows/android-release.yml) uses Node.js 22 and Java 21, validates TypeScript and tests, generates the native Android project, and builds a signed arm64 APK. Version tags (`v*`) publish GitHub releases; manual runs upload workflow artifacts. The workflow verifies the application ID, signing certificate, and APK architecture.

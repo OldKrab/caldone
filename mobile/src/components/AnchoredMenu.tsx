@@ -5,7 +5,7 @@ import { color, radius, space, type } from '../design/tokens';
 import { t } from '../i18n';
 
 export type MenuAnchor = { x: number; y: number; width: number; height: number };
-export type AnchoredMenuItem = { label: string; icon?: keyof typeof Ionicons.glyphMap; onPress: () => void | Promise<void> };
+export type AnchoredMenuItem = { label: string; icon?: keyof typeof Ionicons.glyphMap; disabled?: boolean; onPress: () => void | Promise<void> };
 
 export function AnchoredMenu(props: {
   anchor?: MenuAnchor;
@@ -25,9 +25,11 @@ export function AnchoredMenu(props: {
           {props.items.map((item) => (
             <Pressable
               accessibilityRole="menuitem"
+              accessibilityState={{ disabled: Boolean(item.disabled) }}
+              disabled={item.disabled}
               key={item.label}
               onPress={() => { props.onClose(); void item.onPress(); }}
-              style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
+              style={({ pressed }) => [styles.item, pressed && styles.itemPressed, item.disabled && styles.itemDisabled]}
             >
               {item.icon ? <Ionicons name={item.icon} color={color.muted} size={19} /> : null}
               <Text style={styles.label}>{item.label}</Text>
@@ -56,5 +58,6 @@ const styles = StyleSheet.create({
   },
   item: { alignItems: 'center', flexDirection: 'row', gap: 12, minHeight: 52, paddingHorizontal: space.md },
   itemPressed: { backgroundColor: color.surfacePressed },
+  itemDisabled: { opacity: 0.45 },
   label: { color: color.ink, fontFamily: type.ticketBold, fontSize: 17 },
 });

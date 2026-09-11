@@ -6,7 +6,7 @@ import { mealQuestionChoices } from '../../domain/mealQuestions';
 import { Ionicons } from '@expo/vector-icons';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import * as Sharing from 'expo-sharing';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Image,
   Modal,
@@ -23,6 +23,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { shouldStackFormFields } from '../../components/adaptiveScreen';
 import { IconButton, PrimaryButton } from '../../components/controls';
 import { useAppDialog } from '../../components/AppDialog';
+import { AnchoredMenu, type AnchoredMenuItem, type MenuAnchor } from '../../components/AnchoredMenu';
 import { KeyboardSafeArea } from '../../components/KeyboardSafeArea';
 import { ScreenReveal } from '../../components/ScreenReveal';
 import { color, radius, space, type } from '../../design/tokens';
@@ -45,6 +46,7 @@ export function MealDetailScreen(props: {
   creating?: boolean;
   onBack: () => void;
   onAddDish: () => void;
+  onReanalyze: () => Promise<void>;
   onAnswer: (answer: string) => Promise<void>;
   onDelete: () => void;
   onAskAssistant: () => void;
@@ -56,7 +58,15 @@ export function MealDetailScreen(props: {
   const [draft, setDraft] = useState<MealAnalysis | undefined>(props.meal.analysis);
   const [time, setTime] = useState(editableTime(props.meal.capturedAt));
   const [answering, setAnswering] = useState(false);
-  const working = answering || props.answerSubmitting || Boolean(props.activity) || props.meal.status === 'queued' || props.meal.status === 'analyzing';
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const working = reanalyzing || answering || props.answerSubmitting || Boolean(props.activity) || props.meal.status === 'queued' || props.meal.status === 'analyzing';
+
+  const reanalyze = async () => {
+    if (working) return;
+    setReanalyzing(true);
+    try { await props.onReanalyze(); }
+    finally { setReanalyzing(false); }
+  };
 
   useEffect(() => {
     if (editing) return;
@@ -105,16 +115,32 @@ export function MealDetailScreen(props: {
     ],
   });
 
+  const menuItems: AnchoredMenuItem[] = [
+    { label: t('editManually'), icon: 'create-outline', disabled: !draft || working,
+      onPress: () => { setEditing(true); setError(''); } },
+    { label: t('reanalyzeMeal'), icon: 'refresh-outline', disabled: working, onPress: reanalyze },
+    ...(!draft && props.meal.status === 'failed'
+      ? [{ label: t('deleteMeal'), icon: 'trash-outline' as const, onPress: confirmDelete }] : []),
+  ];
+
+  const bottomActions = !editing && !props.creating && (
+    <View style={styles.actionsDock}>
+      <PrimaryButton icon="chatbubble-outline" label={t('editOrDiscuss')} onPress={props.onAskAssistant} />
+      <PrimaryButton icon="add" label={t('addDish')} variant="outlined" disabled={!canAddDish(props.meal) || working} onPress={props.onAddDish} />
+    </View>
+  );
+
   if (!draft) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <Header title={t('mealDetails')} onBack={props.onBack} actionLabel={props.meal.status === 'failed' ? t('delete') : undefined} onAction={confirmDelete} />
+        <Header title={t('mealDetails')} onBack={props.onBack} menuItems={menuItems} />
         <View style={styles.loading}>
           {props.meal.photos[0] && <Image source={{ uri: props.meal.photos[0].uri }} style={styles.pendingPhoto} />}
           {props.meal.status === 'failed' ? <Text selectable style={styles.loadingText}>{t('failed')}</Text> : <MealProgress mealId={props.meal.id} stage={props.activity} />}
-          <Text selectable style={styles.pendingHelp}>{props.meal.status === 'failed' ? (locale === 'ru' ? 'Не удалось получить оценку. Вернитесь к дневнику, чтобы повторить анализ, или удалите запись.' : 'The estimate could not be completed. Return to your journal to retry, or delete this record.') : (locale === 'ru' ? 'Можно вернуться к дневнику. Результат появится в записи.' : 'You can return to your journal. The result will appear in this record.')}</Text>
+          <Text selectable style={styles.pendingHelp}>{props.meal.status === 'failed' ? (locale === 'ru' ? 'Не удалось получить оценку. Повторите анализ или удалите запись.' : 'The estimate could not be completed. Reanalyze the meal or delete this record.') : (locale === 'ru' ? 'Можно вернуться к дневнику. Результат появится в записи.' : 'You can return to your journal. The result will appear in this record.')}</Text>
           <PrimaryButton label={locale === 'ru' ? 'К дневнику' : 'Back to journal'} onPress={props.onBack} />
         </View>
+        {bottomActions}
       </SafeAreaView>
     );
   }
@@ -123,7 +149,8 @@ export function MealDetailScreen(props: {
     <KeyboardSafeArea>
       <ScreenReveal>
         <Header
-          actionLabel={t(editing ? 'cancel' : 'edit')}
+          actionLabel={editing || props.creating ? t('cancel') : undefined}
+          menuItems={editing || props.creating ? undefined : menuItems}
           title={props.creating ? t('addMeal') : locale === 'ru' ? (editing ? 'Изменить запись' : 'Приём пищи') : (editing ? 'Edit meal' : 'Meal details')}
           onAction={() => { if (props.creating) return props.onBack(); setEditing((value) => !value); setError(''); }}
           onBack={props.onBack}
@@ -182,15 +209,8 @@ export function MealDetailScreen(props: {
 
         {error ? <Text selectable accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
 
-        {!editing && !props.creating && !working && canAddDish(props.meal) && <View style={styles.mealActions}>
-          <PrimaryButton icon="add" label={t('addDish')} onPress={props.onAddDish} />
-        </View>}
-        {!editing && <Pressable accessibilityRole="button" onPress={props.onAskAssistant} style={styles.assistantAction}>
-          <Ionicons name="chatbubble-outline" size={19} color={color.action} />
-          <Text style={styles.assistantActionText}>{locale === 'ru' ? 'Обсудить еду' : 'Discuss meal'}</Text>
-          <Ionicons name="chevron-forward" size={17} color={color.muted} />
-        </Pressable>}
         </ScrollView>
+        {bottomActions}
         {editing && <View style={styles.saveDock}>
           <PrimaryButton label={t(props.creating ? 'addMeal' : 'saveChanges')} onPress={save} />
           {!props.creating && <Pressable accessibilityRole="button" onPress={confirmDelete} style={styles.deleteAction}><Text style={styles.delete}>{t('deleteMeal')}</Text></Pressable>}
@@ -205,12 +225,21 @@ function Header(props: {
   onBack: () => void;
   actionLabel?: string;
   onAction?: () => void;
+  menuItems?: AnchoredMenuItem[];
 }) {
+  const menuTrigger = useRef<View>(null);
+  const [anchor, setAnchor] = useState<MenuAnchor>();
   return (
     <View style={styles.header}>
       <View style={styles.headerSide}><IconButton icon="arrow-back" label={t('back')} onPress={props.onBack} /></View>
       <Text selectable adjustsFontSizeToFit minimumFontScale={0.86} numberOfLines={1} style={styles.headerTitle}>{props.title}</Text>
-      {props.actionLabel && props.onAction ? (
+      {props.menuItems ? (
+        <View style={[styles.headerSide, styles.headerSideEnd]}>
+          <IconButton ref={menuTrigger} icon="ellipsis-vertical" label={t('mealActions')}
+            onPress={() => menuTrigger.current?.measureInWindow((x, y, width, height) => setAnchor({ x, y, width, height }))} />
+          <AnchoredMenu anchor={anchor} items={props.menuItems} onClose={() => setAnchor(undefined)} />
+        </View>
+      ) : props.actionLabel && props.onAction ? (
         <View style={[styles.headerSide, styles.headerSideEnd]}><Pressable accessibilityRole="button" hitSlop={6} onPress={props.onAction} style={styles.headerActionButton}>
           <Text numberOfLines={1} style={styles.headerAction}>{props.actionLabel}</Text>
         </Pressable></View>
@@ -484,6 +513,7 @@ function formatMacro(grams: number, units: NutritionUnits): string {
 }
 
 const styles = StyleSheet.create({
+  actionsDock: { backgroundColor: color.canvas, borderTopColor: color.line, borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: space.md, paddingVertical: space.sm, gap: space.sm },
   saveDock: { paddingHorizontal: 20, paddingTop: 10, backgroundColor: color.canvas, borderTopColor: color.line, borderTopWidth: StyleSheet.hairlineWidth },
   deleteAction: { alignItems: 'center', justifyContent: 'center', minHeight: 48 },
   ingredientHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, paddingBottom: 10 },
@@ -508,7 +538,6 @@ const styles = StyleSheet.create({
   photoIndex: { backgroundColor: color.cameraChrome, borderRadius: radius.round, bottom: space.sm, paddingHorizontal: 9, paddingVertical: 5, position: 'absolute', right: space.sm },
   photoIndexText: { color: color.cameraText, fontFamily: type.ticketBold, fontSize: 12 },
   mealHeading: { gap: space.xs, marginBottom: space.sm },
-  mealActions: { marginTop: space.md },
   noteBlock: { marginTop: space.sm, gap: space.xs },
   noteLabel: { color: color.muted, fontSize: 12 },
   noteText: { color: color.ink, fontSize: 15, lineHeight: 21 },
@@ -532,8 +561,6 @@ const styles = StyleSheet.create({
   itemNutritionCompact: { alignItems: 'flex-start', maxWidth: '100%' },
   itemCalories: { color: color.ink, fontSize: 14, fontWeight: '600' },
   itemMacros: { color: color.muted, flexShrink: 1, fontSize: 11, marginTop: 4, textAlign: 'right' },
-  assistantAction: { alignItems: 'center', flexDirection: 'row', gap: space.sm, marginTop: space.sm, minHeight: 48 },
-  assistantActionText: { color: color.action, flex: 1, fontSize: 15 },
   editWithAssistant: { alignItems: 'center', backgroundColor: color.actionSoft, borderColor: color.line, borderRadius: radius.surface, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: space.sm, marginBottom: 18, minHeight: 60, padding: space.sm },
   editWithAssistantIcon: { alignItems: 'center', backgroundColor: color.surfacePressed, borderRadius: radius.control, height: 42, justifyContent: 'center', width: 42 },
   editWithAssistantCopy: { flex: 1, minWidth: 0 },

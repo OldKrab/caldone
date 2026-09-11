@@ -11,7 +11,10 @@ export function PrimaryButton(props: {
   busy?: boolean;
   disabled?: boolean;
   dark?: boolean;
+  variant?: 'filled' | 'outlined';
 }) {
+  const outlined = props.variant === 'outlined';
+  const foreground = outlined ? color.action : color.surface;
   return (
     <Pressable
       accessibilityRole="button"
@@ -22,16 +25,18 @@ export function PrimaryButton(props: {
       style={({ pressed }) => [
         styles.primary,
         props.dark && styles.primaryDark,
+        outlined && styles.outlined,
         (props.disabled || props.busy) && styles.disabled,
         pressed && styles.pressed,
+        pressed && outlined && styles.outlinedPressed,
       ]}
     >
       {props.busy ? (
-        <ActivityIndicator color={color.surface} />
+        <ActivityIndicator color={foreground} />
       ) : (
         <View style={styles.buttonContent}>
-          {props.icon && <Ionicons name={props.icon} size={21} color={color.surface} />}
-          <Text style={styles.primaryText}>{props.label}</Text>
+          {props.icon && <Ionicons name={props.icon} size={21} color={foreground} />}
+          <Text style={[styles.primaryText, outlined && styles.outlinedText]}>{props.label}</Text>
         </View>
       )}
     </Pressable>
@@ -85,6 +90,9 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   primaryDark: { shadowColor: color.camera },
+  outlined: { backgroundColor: color.canvas, borderColor: color.action, borderWidth: 1 },
+  outlinedText: { color: color.action },
+  outlinedPressed: { backgroundColor: color.actionSoft },
   primaryText: { color: color.surface, fontFamily: type.ticketBold, fontSize: 16, fontWeight: '600', letterSpacing: 0 },
   buttonContent: { alignItems: 'center', flexDirection: 'row', gap: 9 },
   disabled: { opacity: 0.45 },
