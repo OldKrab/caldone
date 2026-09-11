@@ -3,7 +3,7 @@ import { buildActivityFeed, type ActivityTool } from './activityFeed';
 import { QuestionAnswers } from '../../components/QuestionAnswers';
 import { mealQuestionChoices } from '../../domain/mealQuestions';
 import type { QuestionChoices } from '../../domain/questionChoices';
-import { connectionErrorText } from '../../services/connectionRecovery';
+import { AssistantError } from './AssistantError';
 import { Ionicons } from '@expo/vector-icons';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { actionDetails } from './actionDetails';
@@ -335,14 +335,10 @@ export function AssistantScreen(props: {
               <MealProgress label={t('assistantWorking')} />
             )}
             {props.selectedMeal?.error && !snapshot.mealActivity && !snapshot.busy && !snapshot.error &&
-              <Text selectable accessibilityRole="alert" style={styles.error}>{connectionErrorText(props.selectedMeal.error, locale)}</Text>}
-            {snapshot.error && !snapshot.busy && <View>
-              <Text selectable accessibilityRole="alert" style={styles.error}>{connectionErrorText(snapshot.error, locale)}</Text>
-              <Pressable accessibilityRole="button" disabled={Boolean(snapshot.mealActivity)} onPress={() => void session?.retry().catch(() => undefined)} style={styles.stepsToggle}>
-                <Ionicons name="refresh-outline" size={18} color={color.action} />
-                <Text style={styles.stepsLabel}>{locale === 'ru' ? 'Повторить' : 'Retry'}</Text>
-              </Pressable>
-            </View>}
+              <AssistantError error={props.selectedMeal.error} />}
+            {snapshot.error && !snapshot.busy && <AssistantError error={snapshot.error}
+              retryDisabled={Boolean(snapshot.mealActivity)}
+              onRetry={() => void session?.retry().catch(() => undefined)} />}
           </ScrollView>
 
           <View ref={composerRoot} style={[styles.composerDock, { paddingBottom: space.sm + composerBottomSpace(effectiveKeyboardVisible, props.bottomInset) }]}>
@@ -573,7 +569,7 @@ function ToolActivityRow({ tool }: { tool: ActivityTool }) {
       <Ionicons name={failed ? 'alert-circle-outline' : tool.status === 'cancelled' ? 'remove-circle-outline' : 'checkmark'} size={16} color={failed ? color.error : color.muted} />
       <Text selectable style={[styles.toolActivityText, failed && styles.toolActivityError]}>{label}{status ? ` · ${status}` : ''}</Text>
     </View>
-    {failed && tool.error && <Text selectable style={styles.error}>{connectionErrorText(tool.error, locale)}</Text>}
+    {failed && tool.error && <AssistantError error={tool.error} />}
   </View>;
 }
 
