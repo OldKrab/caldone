@@ -11,6 +11,11 @@ Before a repository-wide audit or cleanup, establish the checkout's branch, unco
 - Setup, testing, builds, or releases: read [development guidance](docs/development.md).
 - Before creating a branch, committing, opening a PR, or publishing: read [contribution guidance](CONTRIBUTING.md).
 
+## Local environment
+
+- When present, read [AGENTS.local.md](AGENTS.local.md) for this machine's Android emulator and screenshot workflow. That file is local-only and must remain untracked.
+- For native UI review, follow [Native UI screenshots](docs/development.md#native-ui-screenshots): prefer an accelerated emulator, confirm Android has finished booting, capture the actual screen, and inspect the images before sharing. Clearly distinguish a synthetic-data component harness from end-to-end app verification.
+
 ## Release writing
 
 - Follow the [release-writing guidance](docs/development.md#release-writing) for every release and its in-app update panel.

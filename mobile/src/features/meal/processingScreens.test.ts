@@ -102,5 +102,28 @@ test('persisted processing hides stale questions and labels existing estimate un
   assert.equal(nodes(tree, 'MealProgress').length, 1);
   assert.equal(nodes(tree, 'MealProgress')[0].props.compact, true);
   assert.equal(nodes(tree, 'Text')[0].props.children, 'Meal');
-  assert.equal(nodes(tree, 'PrimaryButton').length, 0);
+  const buttons = nodes(tree, 'PrimaryButton');
+  assert.equal(buttons.length, 2);
+  assert.equal(buttons[0].props.label, 'Edit or discuss');
+  assert.equal(Boolean(buttons[0].props.disabled), false, 'meal conversation remains available');
+  assert.equal(buttons[1].props.label, 'Add food or drink');
+  assert.equal(buttons[1].props.disabled, true, 'food cannot be appended during analysis');
+});
+
+test('meal footer exposes conversation and addition as matching buttons with distinct actions', () => {
+  const opened: string[] = [];
+  const tree = screen('MealDetailScreen')({ ...props,
+    meal: { ...meal, status: 'complete', analysis: { ...meal.analysis, clarification: undefined } },
+    onAskAssistant: () => opened.push('conversation'),
+    onAddDish: () => opened.push('addition'),
+  });
+  const buttons = nodes(tree, 'PrimaryButton');
+  assert.equal(buttons.length, 2);
+  assert.equal(buttons[0].props.label, 'Edit or discuss');
+  assert.equal(buttons[1].props.label, 'Add food or drink');
+  assert.equal(buttons[1].props.variant, 'outlined');
+  assert.equal(buttons[1].props.disabled, false);
+  buttons[0].props.onPress();
+  buttons[1].props.onPress();
+  assert.deepEqual(opened, ['conversation', 'addition']);
 });

@@ -1,3 +1,4 @@
+import { requestMealReanalysis } from './src/services/mealReanalysis';
 import appConfig from './app.json';
 import { mealRequestDiagnostics } from './src/services/mealRequestTraceStore';
 import { submitMealAnswer, subscribeMealAnswers } from './src/services/mealAnswerSubmission';
@@ -471,7 +472,7 @@ function CalDoneApp() {
   const retry = async (meal: Meal) => {
     await queueMealRetry(meal.id);
     await refresh();
-    void processMeal(meal.id).finally(refresh);
+    await processMeal(meal.id).finally(refresh);
   };
 
   const answer = (meal: Meal, value: string) => submitMealAnswer(meal.id, async () => {
@@ -528,15 +529,24 @@ function CalDoneApp() {
     ],
   });
 
+  const reanalyzeMeal = async (meal: Meal) => {
+    const current = meals.find(value => value.id === meal.id);
+    if (!current) return;
+    try {
+      const result = await requestMealReanalysis(current, retry,
+        answeringMealIds.has(current.id) || mealActivities.has(current.id));
+      if (result === 'busy') showInfo(t('analysisAlreadyRunning'));
+      if (result === 'missing_input') showInfo(t('reanalyzeUnavailable'));
+    } catch {
+      showInfo(t('reanalyzeError'));
+    }
+  };
+
   const showMealActions = (meal: Meal) => dialog.show({
     title: meal.analysis?.title ?? t('meal'),
     actions: [
       { label: t('askAssistant'), onPress: () => openAssistant(meal.id) },
-      { label: t('reanalyzeMeal'), onPress: () => {
-        if (meal.status === 'queued' || meal.status === 'analyzing') showInfo(t('analysisAlreadyRunning'));
-        else if (meal.photos.length === 0) showInfo(t('reanalyzeUnavailable'));
-        else void retry(meal);
-      } },
+      { label: t('reanalyzeMeal'), onPress: () => reanalyzeMeal(meal) },
       { label: t('delete'), role: 'destructive', onPress: () => confirmMealDeletion(meal) },
       { label: t('cancel'), role: 'cancel' },
     ],
@@ -961,6 +971,7 @@ function CalDoneApp() {
           initialEditing={Boolean(manualMeal)}
           creating={Boolean(manualMeal)}
           meal={selectedMeal}
+          onReanalyze={() => reanalyzeMeal(selectedMeal)}
           onAddDish={() => {
             setAdditionMealId(selectedMeal.id);
             setPhotos([]);
