@@ -19,7 +19,6 @@ import { formatPhotoCount, locale, t } from '../../i18n';
 
 export function CaptureReviewScreen(props: {
   addingDish?: boolean;
-  onStop?: () => void;
   photos: MealPhoto[];
   note: string;
   sending: boolean;
@@ -110,7 +109,6 @@ export function CaptureReviewScreen(props: {
             />
             {props.error && <Text selectable style={styles.error}>{props.error}</Text>}
             {props.addingDish && <Text selectable accessibilityLiveRegion="polite" style={styles.additionHelp}>{t(props.sending ? 'addingDish' : 'addDishHelp')}</Text>}
-            {props.addingDish && props.sending && <Pressable accessibilityRole="button" onPress={props.onStop} style={styles.addAngle}><Text style={styles.addAngleText}>{t('stop')}</Text></Pressable>}
             <PrimaryButton
               busy={props.sending}
               disabled={props.photos.length === 0}

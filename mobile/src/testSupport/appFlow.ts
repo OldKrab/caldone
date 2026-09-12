@@ -8,7 +8,7 @@ import type { Meal } from '../domain/meal';
  * React owns state/effects; App owns navigation, draft timestamps and save arguments.
  * Screen props are the interaction boundary. This does not test native rendering.
  */
-export function appFlow() {
+export function appFlow(options: { realModules?: string[]; adapters?: Record<string, string> } = {}) {
   const state = { meals: [] as Meal[], onUrl: undefined as undefined | ((event: { url: string }) => void) };
   (globalThis as any).__mealDateFlow = state;
   const appUrl = new URL('../../App.tsx', import.meta.url).href;
@@ -32,6 +32,7 @@ export function appFlow() {
     getItemAsync: 'async () => "true"',
     isSignedIn: 'async () => true',
     subscribeMealActivity: '() => () => undefined',
+    subscribeDishAdditions: '() => () => undefined',
     subscribeMealAnswers: '() => () => undefined',
     initializeMeals: asyncNoop, initializeChat: asyncNoop,
     finalizeExpiredClarifications: asyncNoop,
@@ -56,7 +57,7 @@ export function appFlow() {
   for (const statement of ast.statements) {
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
     const specifier = statement.moduleSpecifier.text;
-    if (specifier === 'react' || specifier.endsWith('.json') || /src\/(domain|design|navigation)\//.test(specifier) || specifier.endsWith('/i18n') || specifier.endsWith('/mealInput')) continue;
+    if (options.realModules?.includes(specifier) || specifier === 'react' || specifier.endsWith('.json') || /src\/(domain|design|navigation)\//.test(specifier) || specifier.endsWith('/i18n') || specifier.endsWith('/mealInput')) continue;
     const clause = statement.importClause;
     if (!clause || clause.isTypeOnly) continue;
     let names: string[];
@@ -77,6 +78,7 @@ export function appFlow() {
   }
   const hooks = registerHooks({
     resolve(specifier, context, next) {
+      if (options.adapters?.[specifier]) return { url: 'data:text/javascript,' + encodeURIComponent(options.adapters[specifier]), shortCircuit: true };
       if ((context.parentURL === appUrl || specifier === 'react-native') && modules.has(specifier)) {
         return { url: 'data:text/javascript,' + encodeURIComponent(modules.get(specifier)!), shortCircuit: true };
       }

@@ -7,7 +7,6 @@ import { t } from '../../i18n';
 
 export function DescribeMealScreen(props: {
   addingDish?: boolean;
-  onStop?: () => void;
   note: string;
   sending: boolean;
   error?: string;
@@ -36,7 +35,6 @@ export function DescribeMealScreen(props: {
         <Text selectable style={styles.hint}>{t('describeMealHint')}</Text>
         {props.error && <Text selectable accessibilityRole="alert" style={styles.error}>{props.error}</Text>}
         {props.addingDish && props.sending && <Text selectable accessibilityLiveRegion="polite" style={styles.hint}>{t('addingDish')}</Text>}
-        {props.addingDish && props.sending && <Pressable accessibilityRole="button" onPress={props.onStop} style={{ minHeight: 48, justifyContent: 'center' }}><Text style={{ color: color.action, textAlign: 'center' }}>{t('stop')}</Text></Pressable>}
         <PrimaryButton label={t(props.addingDish ? 'addDish' : 'analyzeMeal')} busy={props.sending} disabled={!hasMealInput({ photos: [], note: props.note })} onPress={props.onSend} />
         {props.onManual && <Pressable accessibilityRole="button" disabled={props.sending} onPress={props.onManual} style={({ pressed }) => ({ minHeight: 48, justifyContent: 'center', opacity: props.sending ? 0.4 : pressed ? 0.7 : 1 })}>
           <Text style={{ color: color.action, textAlign: 'center', fontSize: 14 }}>{t('enterNutritionManually')}</Text>

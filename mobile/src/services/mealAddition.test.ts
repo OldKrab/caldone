@@ -21,13 +21,13 @@ const addition: MealAnalysis = {
 };
 const fixture = {
   meal: structuredClone(original) as Meal | undefined,
-  result: addition, input: undefined as any, readPhotos: [] as string[], saves: 0, releases: 0,
+  result: addition, input: undefined as any, readPhotos: [] as string[], deletedPhotos: [] as string[], saves: 0, releases: 0,
   afterAnalyze: async () => {}, fail: false,
 };
 (globalThis as any).__dishAddition = fixture;
 const sources: Record<string, string> = {
   './foregroundWork': 'export const beginForegroundWork=async()=>async()=>{globalThis.__dishAddition.releases++};',
-  'expo-file-system': `export class File {constructor(uri){this.uri=uri} async base64(){globalThis.__dishAddition.readPhotos.push(this.uri); return 'bytes:'+this.uri}}`,
+  'expo-file-system': `export class File {constructor(uri){this.uri=uri} get exists(){return true} delete(){globalThis.__dishAddition.deletedPhotos.push(this.uri)} async base64(){globalThis.__dishAddition.readPhotos.push(this.uri); return 'bytes:'+this.uri}}`,
   'expo-notifications': 'export const setNotificationHandler=()=>{};',
   'react-native': 'export const AppState={currentState:"active"};export const Platform={OS:"android"};',
   '../ai/piClient': `export async function analyzeMeal(input){const f=globalThis.__dishAddition; f.input=input; await f.afterAnalyze(); if(f.fail)throw new Error('offline');return {text:JSON.stringify(f.result)}};export const refineMealAnalysis=analyzeMeal;export const correctMealAnalysis=analyzeMeal;`,
@@ -54,7 +54,7 @@ const newPhoto = { id: 'new', uri: 'new-photo', mimeType: 'image/jpeg', createdA
 function reset() {
   Object.assign(fixture, {
     meal: structuredClone(original), result: structuredClone(addition), input: undefined,
-    readPhotos: [], saves: 0, releases: 0, afterAnalyze: async () => {}, fail: false,
+    readPhotos: [], deletedPhotos: [], saves: 0, releases: 0, afterAnalyze: async () => {}, fail: false,
   });
 }
 
@@ -168,6 +168,88 @@ test('stopping analysis leaves the meal unchanged and permits a fresh submission
   fixture.afterAnalyze = async () => {};
   await addDishToMeal('lunch', { photos: [], note: 'Salad' });
   assert.equal(fixture.saves, 1);
+});
+
+test('background addition returns before recognition and publishes completion without replacing original items', async () => {
+  reset();
+  const service = await import('./backgroundDishAddition.ts');
+  let finish!: () => void;
+  fixture.afterAnalyze = () => new Promise<void>(resolve => { finish = resolve; });
+  let state: ReadonlyMap<string, import('./backgroundDishAddition.ts').DishAdditionState> = new Map();
+  const unsubscribe = service.subscribeDishAdditions(value => { state = value; });
+  const returned = service.startDishAddition('lunch', { photos: [newPhoto], note: 'Salad' });
+  assert.equal(returned, undefined, 'capture can close without awaiting the model');
+  assert.equal(state.get('lunch')?.status, 'running');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(fixture.saves, 0);
+  finish();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.has('lunch'), false);
+  assert.deepEqual(fixture.meal!.analysis!.items, [...original.analysis!.items, ...addition.items]);
+  unsubscribe();
+});
+
+test('background failure keeps input for retry and rejects duplicate submissions', async () => {
+  reset();
+  const service = await import('./backgroundDishAddition.ts');
+  fixture.fail = true;
+  let state: ReadonlyMap<string, import('./backgroundDishAddition.ts').DishAdditionState> = new Map();
+  const unsubscribe = service.subscribeDishAdditions(value => { state = value; });
+  service.startDishAddition('lunch', { photos: [newPhoto], note: 'Salad' });
+  assert.throws(() => service.startDishAddition('lunch', { photos: [], note: 'Duplicate' }), /analysisAlreadyRunning/);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.get('lunch')?.status, 'failed');
+  assert.deepEqual(fixture.meal, original);
+  assert.deepEqual(fixture.deletedPhotos, []);
+  fixture.fail = false;
+  service.retryDishAddition('lunch');
+  service.retryDishAddition('lunch');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.has('lunch'), false);
+  assert.equal(fixture.saves, 1);
+  assert.equal(fixture.input.note, 'Salad');
+  assert.deepEqual(fixture.deletedPhotos, []);
+  unsubscribe();
+});
+
+test('stopping background recognition preserves the meal; discarding releases only the new photos', async () => {
+  reset();
+  const service = await import('./backgroundDishAddition.ts');
+  let finish!: () => void;
+  fixture.afterAnalyze = () => new Promise<void>(resolve => { finish = resolve; });
+  let state: ReadonlyMap<string, import('./backgroundDishAddition.ts').DishAdditionState> = new Map();
+  const unsubscribe = service.subscribeDishAdditions(value => { state = value; });
+  service.startDishAddition('lunch', { photos: [newPhoto], note: 'Salad' });
+  await new Promise(resolve => setImmediate(resolve));
+  service.stopDishAddition('lunch');
+  finish();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(fixture.meal, original);
+  assert.equal(state.get('lunch')?.status, 'failed');
+  service.discardDishAddition('lunch');
+  assert.equal(state.has('lunch'), false);
+  assert.deepEqual(fixture.deletedPhotos, ['new-photo']);
+  unsubscribe();
+});
+
+test('discarding active work cancels the request before freeing its private photo copies', async () => {
+  reset();
+  const service = await import('./backgroundDishAddition.ts');
+  let finish!: () => void;
+  fixture.afterAnalyze = () => new Promise<void>(resolve => { finish = resolve; });
+  let state: ReadonlyMap<string, import('./backgroundDishAddition.ts').DishAdditionState> = new Map();
+  const unsubscribe = service.subscribeDishAdditions(value => { state = value; });
+  service.startDishAddition('lunch', { photos: [newPhoto], note: 'Salad' });
+  await new Promise(resolve => setImmediate(resolve));
+  service.discardDishAddition('lunch');
+  assert.equal(fixture.input.signal.aborted, true);
+  assert.deepEqual(fixture.deletedPhotos, []);
+  finish();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.has('lunch'), false);
+  assert.equal(fixture.saves, 0);
+  assert.deepEqual(fixture.deletedPhotos, ['new-photo']);
+  unsubscribe();
 });
 
 test.after(() => hooks.deregister());
