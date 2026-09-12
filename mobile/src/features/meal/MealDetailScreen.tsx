@@ -156,7 +156,7 @@ export function MealDetailScreen(props: {
         <Header
           actionLabel={editing || props.creating ? t('cancel') : undefined}
           menuItems={editing || props.creating ? undefined : menuItems}
-          title={props.creating ? t('addMeal') : locale === 'ru' ? (editing ? 'Изменить запись' : 'Приём пищи') : (editing ? 'Edit meal' : 'Meal details')}
+          title={t(props.creating ? 'addMeal' : editing ? 'editManually' : 'mealDetails')}
           onAction={() => { if (props.creating) return props.onBack(); setEditing((value) => !value); setError(''); }}
           onBack={props.onBack}
         />
