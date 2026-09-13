@@ -6,6 +6,7 @@ import type { BackupConversation, BackupMessage, BackupPhoto, CalDoneBackup } fr
 import { planBackupMerge } from '../domain/backup';
 import type { Meal, MealPhoto } from '../domain/meal';
 import { sanitizeChatMessage } from './chatRepository';
+import { writeAgentQuestion, notifyAgentQuestions } from './agentQuestionRepository';
 
 
 export type BackupImportResult = {
@@ -71,6 +72,7 @@ export async function mergeCalDoneBackup(backup: CalDoneBackup): Promise<BackupI
           meal.analysis?.clarification ? meal.capturedAt : null,
         );
         if (result.changes === 1) {
+          for(const question of meal.questions??[])await writeAgentQuestion(question,database);
           mealsImported += 1;
           photosImported += meal.photos.length;
         } else {
@@ -96,6 +98,7 @@ export async function mergeCalDoneBackup(backup: CalDoneBackup): Promise<BackupI
           continue;
         }
         conversationsImported += 1;
+        for(const question of restored.conversation.questions??[])await writeAgentQuestion(question,database);
         photosImported += restored.files.length;
         for (const [position, message] of restored.messages.entries()) {
           await database.runAsync(
@@ -118,6 +121,7 @@ export async function mergeCalDoneBackup(backup: CalDoneBackup): Promise<BackupI
         }
       }
     });
+    notifyAgentQuestions();
 
     return {
       mealsImported,

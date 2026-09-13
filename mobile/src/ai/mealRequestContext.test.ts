@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mealRequestContext } from './mealRequestContext.ts';
-import { buildMealClarificationContent } from './mealClarificationContent.ts';
 
 test('the original search request survives clarification without promoting model claims to user evidence', () => {
   const context=mealRequestContext([
@@ -10,10 +9,9 @@ test('the original search request survives clarification without promoting model
     {role:'chatUser',text:'ВСЮ БУТЫЛКУ ВЫПИЛ, КАЛ ГУГЛИ'},
   ] as any, 'Confirmed online: 200 kcal');
   assert.equal(context.requireSearch,true);
-  const content=buildMealClarificationContent({previousJson:'{}',question:'How much?',answer:context.userMessages.join('\n'),photos:[],assistantInterpretation:context.assistantInterpretation});
-  const payload=JSON.parse((content[0] as {text:string}).text);
-  assert.equal(payload.userAnswer,'Погугли, всю выпил\nВСЮ БУТЫЛКУ ВЫПИЛ, КАЛ ГУГЛИ');
-  assert.equal(payload.assistantInterpretation,'Confirmed online: 200 kcal');
+  assert.deepEqual(context.userMessages,['Погугли, всю выпил','ВСЮ БУТЫЛКУ ВЫПИЛ, КАЛ ГУГЛИ']);
+  assert.equal(context.assistantInterpretation,'Confirmed online: 200 kcal');
+  assert.ok(!context.userMessages.some(message=>message.includes('Confirmed online')));
 });
 
 test('completed meal work bounds the next request and a search opt-out is respected', () => {

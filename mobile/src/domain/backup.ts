@@ -4,6 +4,7 @@ import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { GoalProfile } from './goalEstimator.ts';
 import { parseGoalProfile } from './goalEstimator.ts';
 import type { ChatThread } from './chat.ts';
+import type { AgentQuestion } from './agentQuestion.ts';
 import type { DailyGoals, Meal, MealAnalysis, MealStatus } from './meal.ts';
 import type { NotificationPreferences, NutritionUnits } from './preferences.ts';
 
@@ -22,7 +23,7 @@ export type BackupPhoto = {
 export type BackupMeal = Omit<Meal, 'photos'> & { photos: BackupPhoto[] };
 export type BackupMessage = AgentMessage | (Record<string, unknown> & { role: 'chatUser'; text: string; timestamp: number; attachments: BackupPhoto[] });
 export type BackupAction = { id: string; label: string; createdAt: number; undone: boolean };
-export type BackupConversation = { thread: ChatThread; messages: BackupMessage[]; actions: BackupAction[] };
+export type BackupConversation = { thread: ChatThread; messages: BackupMessage[]; actions: BackupAction[]; questions?: AgentQuestion[] };
 
 export type BackupPreferences = {
   goals?: DailyGoals;
@@ -148,6 +149,7 @@ function parseMeal(value: unknown): BackupMeal {
     photos: array(source.photos ?? [], 'meal.photos', 100).map(parsePhoto),
     analysis,
     error: source.error === undefined || source.error === null ? undefined : text(source.error, 'meal.error', 20_000),
+    ...(source.questions!==undefined?{questions:parseAgentQuestions(source.questions,{mealId:text(source.id,'meal.id',160)})}:{}),
   };
 }
 
@@ -168,7 +170,29 @@ function parseConversation(value: unknown): BackupConversation {
     thread,
     messages: array(source.messages ?? [], 'conversation.messages', 20_000).map(parseMessage),
     actions: array(source.actions ?? [], 'conversation.actions', 20_000).map(parseAction),
+    ...(source.questions!==undefined?{questions:parseAgentQuestions(source.questions,{threadId:thread.id})}:{}),
   };
+}
+
+function parseAgentQuestions(value:unknown,owner:{mealId?:string;threadId?:string}):AgentQuestion[]{
+  const ids=new Set<string>();
+  return array(value,'questions',20_000).map(value=>{
+    const source=record(value,'question');
+    const id=text(source.id,'question.id',512);
+    if(!id || ids.has(id))throw new Error('Duplicate or missing question ID');
+    ids.add(id);
+    if(!['open','answered','dismissed'].includes(String(source.state)))throw new Error('Invalid question state');
+    if(source.mealId!==undefined && source.mealId!==owner.mealId || source.threadId!==undefined && source.threadId!==owner.threadId)
+      throw new Error('Question belongs to another record');
+    if(source.uncertain!==undefined && typeof source.uncertain!=='boolean')throw new Error('Invalid answer uncertainty');
+    const answer=source.answer===undefined?undefined:text(source.answer,'question.answer',100_000);
+    if(source.state!=='open' && !answer?.trim())throw new Error('A closed question needs its answer or reason');
+    return {id,...owner,question:text(source.question,'question.question',20_000),
+      options:array(source.options??[],'question.options',6).map(option=>text(option,'question.option',160)),
+      state:source.state as AgentQuestion['state'],createdAt:nonNegativeNumber(source.createdAt??0,'question.createdAt'),
+      ...(answer!==undefined?{answer}:{}),...(source.uncertain!==undefined?{uncertain:source.uncertain as boolean}:{}),
+    };
+  });
 }
 
 function parseMessage(value: unknown): BackupMessage {

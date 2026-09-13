@@ -13,7 +13,7 @@ test('chat prompt separates discussion from authorized changes', () => {
   assert.match(prompt, /Never claim a change succeeded until its tool returns success/);
   assert.match(prompt, /do not add it to meal history/);
   assert.match(prompt, /statusText/);
-  assert.match(prompt, /reanalyze_meal/);
+  assert.match(prompt, /edit_meal/);
   assert.match(prompt, /summarize_nutrition/);
   assert.match(CHAT_PROMPT_VERSION, /^caldone-assistant-v\d+$/);
 });
@@ -23,7 +23,7 @@ test('chat prompt carries selected meal context and all pending questions', () =
   assert.match(prompt, /meal ID meal-42/);
   assert.match(prompt, /How much\?/);
   assert.match(prompt, /Which sauce\?/);
-  assert.match(prompt, /answer_meal_question/);
+  assert.match(prompt, /edit_meal/);
   assert.match(prompt, /Reply in Russian/);
 });
 
@@ -44,17 +44,10 @@ test('selected-meal photo references use saved evidence before asking for anothe
   assert.match(prompt, /everything in the picture/);
 });
 
-
-test('a user who cannot quantify their portion is not asked for alternative measurements', () => {
-  const prompt=buildChatPrompt({language:'Russian',now:0});
-  assert.match(prompt,/If the user does not know the portion/);
-  assert.match(prompt,/do not ask for weight, dimensions, counts/);
-  assert.match(prompt,/finish the estimate with answer_meal_question/);
-});
-
 test('disputing recognition triggers photo inspection without treating the disputed question as confirmation', () => {
   const prompt = buildChatPrompt({language: 'Russian', selectedMealId: 'meal-1', selectedMealQuestions: ['How many loaves?'], now: 0});
   assert.match(prompt, /If the user disputes.*view_meal_photos/);
   assert.match(prompt, /Echoed questions are not user confirmation/);
   assert.match(prompt, /Do not claim text is printed on packaging unless you can read it in the actual photo/);
+  assert.doesNotMatch(prompt, /Interpret the user's reply against all of them, retrieve the meal, and use answer_meal_question/);
 });

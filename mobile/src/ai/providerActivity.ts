@@ -5,6 +5,7 @@ import { searchActivityObserver } from './searchDiagnostics';
 import { appendDiagnosticEvent } from '../data/mealRepository';
 
 export type { ProviderToolActivity } from './providerActivityEvent';
+let requestSequence = 0;
 
 /**
  * Mirrors only provider lifecycle metadata that Pi does not currently surface.
@@ -14,8 +15,10 @@ export function fetchWithProviderActivity(
   onActivity?: (activity: ProviderToolActivity) => void,
 ): typeof globalThis.fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const requestScope = `${Date.now().toString(36)}-${++requestSequence}`;
     const response = await expoFetch(input as never, init as never);
-    if (response.body && response.headers.get('content-type')?.includes('text/event-stream')) {
+    const contentType = response.headers.get('content-type');
+    if (response.body && (!contentType || contentType.includes('text/event-stream'))) {
       try {
         const record = searchActivityObserver(activity => {
           void appendDiagnosticEvent({
@@ -24,8 +27,11 @@ export function fetchWithProviderActivity(
           }).catch(() => undefined);
         });
         void observeEventStream(response.clone() as unknown as Response, activity => {
-          record(activity);
-          onActivity?.(activity);
+          if (init?.signal?.aborted) return;
+          // Provider IDs (especially output_index fallbacks) are response-local.
+          const scoped = { ...activity, id: `${requestScope}:${activity.id}` };
+          record(scoped);
+          onActivity?.(scoped);
         });
       } catch {
         // The model response remains usable if this optional UI observer cannot clone it.

@@ -109,3 +109,13 @@ export function previewImageUrl(html: string, sourceUrl: string): string | undef
   }
   return candidates.get('og:image:secure_url') ?? candidates.get('og:image') ?? candidates.get('twitter:image') ?? candidates.get('twitter:image:src');
 }
+
+/** Reuse observed-source artwork lookup when the unified agent commits nutrition. */
+export async function resolveMealWebImage(
+  candidate: unknown, research: MealResearch | undefined, hasUserPhotos: boolean,
+  fetchPage?: typeof globalThis.fetch, analysis?: MealAnalysis,
+): Promise<MealWebImage | undefined> {
+  if (!analysis) return undefined;
+  const result = await parseMealResult({text: JSON.stringify({...analysis, webImageSourceUrl:candidate}),research},hasUserPhotos,fetchPage);
+  return result.webImage;
+}

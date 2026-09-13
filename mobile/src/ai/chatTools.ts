@@ -1,17 +1,23 @@
-import { mealConfirmation } from '../services/mealConfirmation';
-import { questionTool } from './questionTool';
+import { scaleSingleItemPortion } from '../domain/mealWeight';
+import { resolveMealWebImage } from '../services/mealWebImage';
+import { createQuestionTools, questionSchema, resolutionSchema } from './questionTool';
+import { commitMealAgentEdit } from '../data/mealAgentRepository';
+import type { QuestionResolution } from '../domain/agentQuestion';
+import type { QuestionChoices } from '../domain/questionChoices';
+import type { MealResearch } from '../domain/mealResearch';
+import { acceptMealResearch } from './mealResearchResult';
 import type { AgentMessage, AgentTool } from '@earendil-works/pi-agent-core';
 import { Type } from '@earendil-works/pi-ai';
 import { Directory, File, Paths } from 'expo-file-system';
 
-import { getChatToolReceipt, loadMealChatMessages, recordChatAction, saveChatToolReceipt } from '../data/chatRepository';
+import { getChatToolReceipt, recordChatAction, saveChatToolReceipt, retainedInputPhotoUris } from '../data/chatRepository';
 import {
+  appendDiagnosticEvent,
   deleteMealIfRevision,
   getDailyGoals,
   getGoalProfile,
   getMeal,
   listMeals,
-  replaceMealIfRevision,
   saveDailyGoals,
   saveGoalProfile,
   saveMealRecord,
@@ -19,11 +25,9 @@ import {
 import { estimateDailyGoals, mergeGoalProfile, parseGoalProfile, type GoalProfile } from '../domain/goalEstimator';
 import type { ChatAttachment } from '../domain/chat';
 import type { DailyGoals, Meal, MealAnalysis, MealItem, MealPhoto, MealStatus } from '../domain/meal';
-import { analysisFromItems, applyMealEdit, summarizeNutrition } from '../domain/mealOperations';
-import { scaleSingleItemPortion } from '../domain/mealWeight';
-import { locale, t } from '../i18n';
+import { analysisFromItems, summarizeNutrition } from '../domain/mealOperations';
+import { t } from '../i18n';
 import { mealRequestContext } from './mealRequestContext';
-import { answerMealClarification, reanalyzeSavedMeal } from '../services/mealProcessor';
 
 type ActivityParams = { statusText?: string };
 type SearchMealsParams = ActivityParams & { query?: string; from?: string; to?: string; statuses?: MealStatus[]; cursor?: string; limit?: number };
@@ -37,10 +41,9 @@ type CreateMealParams = ActivityParams & {
 type EditMealParams = ActivityParams & {
   mealId: string; expectedRevision: number; capturedAt?: string; note?: string; title?: string;
   mealType?: MealAnalysis['mealType']; items?: MealItem[]; portionGrams?: number; addAttachmentIds?: string[]; removePhotoIds?: string[];
+  questions?: QuestionChoices[]; resolutions?: QuestionResolution[]; webImageSourceUrl?: string;
 };
 type MealMutationParams = ActivityParams & { mealId: string; expectedRevision: number };
-type ReanalyzeMealParams = MealMutationParams & { interpretation?: string; requireSearch?: boolean };
-type AnswerQuestionParams = MealMutationParams & { interpretation?: string; requireSearch?: boolean };
 type UpdateGoalsParams = ActivityParams & { calories?: number | null; protein?: number | null; carbs?: number | null; fat?: number | null };
 type UpdateGoalProfileParams = Partial<GoalProfile> & ActivityParams;
 
@@ -63,15 +66,14 @@ const mealStatusSchema = Type.Union([
 
 export function createCalDoneTools(input: {
   threadId: string;
-  /** Analysis uses the same tools, but its caller commits the final result.
-   * Side effects during inference would survive a failed or cancelled estimate. */
-  deferMutations?: boolean;
+  mealId?: string;
+  getResearch?: ()=>Promise<MealResearch>;
   getMessages: () => AgentMessage[];
   attachments: Map<string, ChatAttachment>;
   onDataChanged: () => Promise<void>;
 }): AgentTool[] {
   return [
-    questionTool,
+    ...createQuestionTools(input),
     {
       name: 'search_meals',
       label: 'Search meals',
@@ -113,24 +115,9 @@ export function createCalDoneTools(input: {
     {
       name: 'get_meal',
       label: 'View meal',
-      description: 'Get the complete current record, saved note and original clarification conversation for one meal. User answers and model statements retain their roles. Use view_meal_photos separately for visual inspection.',
+      description: 'Get the complete current structured record for one meal. Use view_meal_photos separately when visual inspection is needed.',
       parameters: Type.Object({ mealId: Type.String(), statusText: activitySchema }, { additionalProperties: false }),
-      execute: async (_id, rawParams) => {
-        const meal = await requiredMeal((rawParams as GetMealParams).mealId);
-        const messages = await loadMealChatMessages(meal.id);
-        // Keep testimony separate from model guesses and avoid recursively
-        // embedding old tool results or their nutrition summaries.
-        const conversation = messages.flatMap(message => {
-          if (message.role === 'chatUser') return [{role: 'user', text: message.text}];
-          if (message.role === 'mealQuestion' && message.mealId === meal.id) return [{role: 'assistant', text: message.questions.join('\n')}];
-          if (message.role === 'assistant') {
-            const text = message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n');
-            return text ? [{role: 'assistant', text}] : [];
-          }
-          return [];
-        });
-        return jsonResult({...mealForTool(meal), conversation});
-      },
+      execute: async (_id, rawParams) => jsonResult(mealForTool(await requiredMeal((rawParams as GetMealParams).mealId))),
     },
     {
       name: 'view_meal_photos',
@@ -203,7 +190,7 @@ export function createCalDoneTools(input: {
         note: Type.Optional(Type.String()), items: Type.Array(itemSchema, { minItems: 1 }),
         attachmentIds: Type.Optional(Type.Array(Type.String())), statusText: activitySchema,
       }, { additionalProperties: false }),
-      execute: async (callId, rawParams) => withReceipt(callId, input, async () => {
+      execute: async (callId, rawParams) => withReceipt(callId, input.threadId, async () => {
         const params = rawParams as CreateMealParams;
         const mealId = mealIdForCall(callId);
         const meal = await getMeal(mealId) ?? await createCompleteMeal(mealId, params, input.attachments);
@@ -219,98 +206,60 @@ export function createCalDoneTools(input: {
     {
       name: 'edit_meal',
       label: 'Edit meal',
-      description: 'Patch one current meal after reading it. Use portionGrams for a weight-only correction to one saved food item with a known weight; CalDone scales its saved nutrition without another model or web request.',
+      description: 'Save a first estimate or patch a meal after reading it. For a weight-only correction to one saved food with known mass, use portionGrams to scale its saved nutrition without new research. The original user note is read-only. Supply item nutrition yourself after inspecting evidence and researching when useful. CalDone sums totals. Resolve only answered or invalidated question IDs; unrelated questions stay open. Questions and nutrition save atomically. An answer may resolve a question without changing nutrition.',
       executionMode: 'sequential',
       parameters: Type.Object({
         mealId: Type.String(), expectedRevision: Type.Number({ minimum: 1 }),
-        capturedAt: Type.Optional(Type.String({ description: 'ISO timestamp.' })), note: Type.Optional(Type.String()),
+        capturedAt: Type.Optional(Type.String({ description: 'ISO timestamp.' })),
         title: Type.Optional(Type.String({ minLength: 1 })), mealType: Type.Optional(mealTypeSchema),
-        portionGrams: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 100_000, description: 'Explicit corrected weight in grams for a single saved food item. Do not combine with items.' })),
+        portionGrams: Type.Optional(Type.Number({exclusiveMinimum:0,maximum:100_000,description:'Corrected grams for one saved item. Do not combine with items.'})),
         items: Type.Optional(Type.Array(itemSchema, { minItems: 1 })), addAttachmentIds: Type.Optional(Type.Array(Type.String())),
-        removePhotoIds: Type.Optional(Type.Array(Type.String())), statusText: activitySchema,
+        removePhotoIds: Type.Optional(Type.Array(Type.String())),
+        webImageSourceUrl: Type.Optional(Type.String({description:'Exact observed source page for optional illustrative art, only when no user photos exist.'})),
+        questions: Type.Optional(Type.Array(questionSchema,{maxItems:3})),
+        resolutions: Type.Optional(Type.Array(resolutionSchema)), statusText: activitySchema,
       }, { additionalProperties: false }),
-      execute: async (callId, rawParams) => withReceipt(callId, input, async () => {
+      execute: async (callId, rawParams) => {
         const params = rawParams as EditMealParams;
-        if (params.portionGrams !== undefined && params.items) throw new Error('Provide either portionGrams or items, not both.');
-        if (params.items && mealRequestContext(input.getMessages(), undefined, false, params.mealId).requireSearch) throw new Error("Use reanalyze_meal to research and recalculate the requested nutrition before saving it.");
+        const cached = await getChatToolReceipt(callId, input.threadId) as Awaited<ReturnType<typeof commitMealAgentEdit>> | undefined;
+        if (cached) return actionResult(cached.actionId, cached.label, mealForTool(cached.meal));
         const before = await requiredMeal(params.mealId);
         requireRevision(before, params.expectedRevision);
-        if (!before.analysis && (params.title || params.mealType || params.items || params.portionGrams !== undefined)) throw new Error('This meal has no nutrition estimate. Reanalyze it or edit only its time, note, or photos.');
         requireMealEdit(params);
-        // Changing a known mass does not research or replace the product's nutrition density.
-        const items = params.portionGrams === undefined ? params.items : scaleSingleItemPortion(before.analysis!.items, params.portionGrams);
-        const addedPhotos = await copyAttachments(before.id, params.addAttachmentIds ?? [], input.attachments);
-        const draft = applyMealEdit(before, {
-          capturedAt: parseTimestamp(params.capturedAt), note: params.note, title: params.title,
-          mealType: params.mealType, items, addPhotos: addedPhotos, removePhotoIds: params.removePhotoIds,
+        if (params.portionGrams !== undefined && params.items) throw new Error('Provide either portionGrams or items, not both.');
+        const items = params.portionGrams === undefined ? params.items : scaleSingleItemPortion(before.analysis?.items ?? [], params.portionGrams);
+        const latest=input.getMessages().findLast(message=>message.role==='chatUser');
+        if(latest?.role==='chatUser' && ['capture','form','addition'].includes(latest.source??'') && input.mealId && params.mealId!==input.mealId)
+          throw new Error('This submitted action is for the selected meal only.');
+        const research=params.items?await input.getResearch?.()??{status:'not_searched' as const,sources:[]}:undefined;
+        if(research)acceptMealResearch(research,mealRequestContext(input.getMessages()).requireSearch);
+        const addition=latest?.role==='chatUser' && latest.source==='addition'?latest:
+          before.analysis?.dishAddition?input.getMessages().findLast(message=>message.role==='chatUser' && message.source==='addition'):undefined;
+        const additionIds=addition?.role==='chatUser'?addition.attachments.map(photo=>photo.id):[];
+        const addedPhotos = await copyAttachments(before.id, [...(params.addAttachmentIds ?? []),...additionIds], input.attachments);
+        const webImage = await resolveMealWebImage(params.webImageSourceUrl, research, before.photos.length + addedPhotos.length > 0, undefined, items ? analysisFromItems({title:params.title ?? before.analysis?.title ?? t('meal'), mealType:params.mealType ?? before.analysis?.mealType ?? 'snack', items}) : before.analysis);
+        const result = await commitMealAgentEdit({
+          callId, threadId:input.threadId, mealId:before.id, expectedRevision:params.expectedRevision,
+          edit:{capturedAt:parseTimestamp(params.capturedAt),note:params.note,title:params.title,mealType:params.mealType,
+            items,addPhotos:addedPhotos,removePhotoIds:params.removePhotoIds},
+          questions:params.questions,resolutions:params.resolutions,
+          research, webImage,
+          label:t('assistantUpdatedMeal',{name:params.title ?? before.analysis?.title ?? t('meal')}),
         });
-        const next = await replaceMealIfRevision(draft, params.expectedRevision);
-        if (!next) {
-          deleteUnreferencedPhotoFiles(addedPhotos, before.photos);
-          throw new Error('This meal changed while it was being edited. Read it again before retrying.');
+        // The meal, receipt and Undo already committed. Cleanup or screen
+        // refresh failures cannot truthfully make this tool report a failed edit.
+        const followups = await Promise.allSettled([
+          deleteUnreferencedPhotoFiles(before.photos, result.meal.photos),
+          Promise.resolve().then(input.onDataChanged),
+        ]);
+        for (const [index, followup] of followups.entries()) if (followup.status === 'rejected') {
+          await appendDiagnosticEvent({ id: `${Date.now()}-${callId}-${index}`, createdAt: Date.now(),
+            operation: 'observer_error', threadId: input.threadId, toolCallId: callId,
+            stage: index === 0 ? 'photo_cleanup' : 'post_commit_refresh',
+          }).catch(() => undefined);
         }
-        deleteUnreferencedPhotoFiles(before.photos, next.photos);
-        const action = await recordChatAction({
-          id: actionIdForCall(callId), threadId: input.threadId,
-          label: t('assistantUpdatedMeal', { name: next.analysis?.title ?? t('meal') }),
-          undo: { kind: 'restore_meal', meal: before, expectedMeal: next },
-        });
-        await input.onDataChanged();
-        return actionResult(action.id, action.label, mealSummary(next));
-      }),
-    },
-    {
-      name: 'reanalyze_meal',
-      label: 'Reanalyze meal',
-      description: 'Run analysis again using saved photos and note, with an optional explicit correction. Use for retries and recalculation.',
-      executionMode: 'sequential',
-      parameters: Type.Object({
-        mealId: Type.String(), expectedRevision: Type.Number({ minimum: 1 }),
-        interpretation: Type.Optional(Type.String({ description: 'Assistant interpretation only; original user messages are supplied by the app.' })),
-        requireSearch: Type.Optional(Type.Boolean({ description: 'True when the user requests research, including indirect wording.' })), statusText: activitySchema,
-      }, { additionalProperties: false }),
-      execute: async (callId, rawParams) => withReceipt(callId, input, async () => {
-        const params = rawParams as ReanalyzeMealParams;
-        const before = await requiredMeal(params.mealId);
-        requireRevision(before, params.expectedRevision);
-        const context = mealRequestContext(input.getMessages(), params.interpretation, params.requireSearch, params.mealId);
-        await reanalyzeSavedMeal(before.id, context.userMessages.join("\n"), context);
-        const next = await requiredMeal(before.id);
-        const action = await recordChatAction({
-          id: actionIdForCall(callId), threadId: input.threadId,
-          label: t('assistantReanalyzedMeal', { name: next.analysis?.title ?? t('meal') }),
-          undo: { kind: 'restore_meal', meal: before, expectedMeal: next },
-        });
-        await input.onDataChanged();
-        return actionResult(action.id, action.label, { ...mealSummary(next), research: next.analysis?.research, confirmation: mealConfirmation(next, locale === 'ru' ? 'ru' : 'en', context.requireSearch) });
-      }),
-    },
-    {
-      name: 'answer_meal_question',
-      label: 'Answer meal question',
-      description: 'Apply the user’s answer to the unresolved clarification question and recalculate the meal.',
-      executionMode: 'sequential',
-      parameters: Type.Object({
-        mealId: Type.String(), expectedRevision: Type.Number({ minimum: 1 }),
-        interpretation: Type.Optional(Type.String({ description: 'Assistant interpretation, never a claimed user answer or verified source.' })),
-        requireSearch: Type.Optional(Type.Boolean({ description: 'True when the user requests research, including indirect wording.' })), statusText: activitySchema,
-      }, { additionalProperties: false }),
-      execute: async (callId, rawParams, signal) => withReceipt(callId, input, async () => {
-        const params = rawParams as AnswerQuestionParams;
-        const before = await requiredMeal(params.mealId);
-        requireRevision(before, params.expectedRevision);
-        if (!before.analysis?.clarification) throw new Error('This meal has no unanswered clarification question.');
-        const context = mealRequestContext(input.getMessages(), params.interpretation, params.requireSearch, params.mealId);
-        await answerMealClarification(before.id, context.userMessages.join("\n"), input.threadId, signal, context);
-        const next = await requiredMeal(before.id);
-        const action = await recordChatAction({
-          id: actionIdForCall(callId), threadId: input.threadId,
-          label: t('assistantUpdatedMeal', { name: next.analysis?.title ?? t('meal') }),
-          undo: { kind: 'restore_meal', meal: before, expectedMeal: next },
-        });
-        await input.onDataChanged();
-        return actionResult(action.id, action.label, { ...mealSummary(next), research: next.analysis?.research, confirmation: mealConfirmation(next, locale === 'ru' ? 'ru' : 'en', context.requireSearch) });
-      }),
+        return actionResult(result.actionId, result.label, mealForTool(result.meal));
+      },
     },
     {
       name: 'delete_meal',
@@ -318,7 +267,7 @@ export function createCalDoneTools(input: {
       description: 'Delete one unambiguous meal only when explicitly asked. Read it first and provide its current revision.',
       executionMode: 'sequential',
       parameters: Type.Object({ mealId: Type.String(), expectedRevision: Type.Number({ minimum: 1 }), statusText: activitySchema }, { additionalProperties: false }),
-      execute: async (callId, rawParams) => withReceipt(callId, input, async () => {
+      execute: async (callId, rawParams) => withReceipt(callId, input.threadId, async () => {
         const params = rawParams as MealMutationParams;
         const before = await requiredMeal(params.mealId);
         requireRevision(before, params.expectedRevision);
@@ -338,7 +287,7 @@ export function createCalDoneTools(input: {
       description: 'Change explicit daily calorie or macro goals only when asked. Null clears a goal; omitted fields stay unchanged.',
       executionMode: 'sequential',
       parameters: Type.Object({ calories: optionalGoal(), protein: optionalGoal(), carbs: optionalGoal(), fat: optionalGoal(), statusText: activitySchema }, { additionalProperties: false }),
-      execute: async (callId, rawParams) => withReceipt(callId, input, async () => {
+      execute: async (callId, rawParams) => withReceipt(callId, input.threadId, async () => {
         const params = rawParams as UpdateGoalsParams;
         const before = await getDailyGoals();
         const next = mergeGoals(before, params);
@@ -366,7 +315,7 @@ export function createCalDoneTools(input: {
         objective: Type.Optional(Type.Union([Type.Literal('lose'), Type.Literal('maintain'), Type.Literal('gain')])),
         statusText: activitySchema,
       }, { additionalProperties: false }),
-      execute: async (callId, rawParams) => withReceipt(callId, input, async () => {
+      execute: async (callId, rawParams) => withReceipt(callId, input.threadId, async () => {
         const params = rawParams as UpdateGoalProfileParams;
         const before = await getGoalProfile();
         const patch = goalProfilePatch(params);
@@ -388,7 +337,7 @@ export function createCalDoneTools(input: {
       description: 'Recalculate and save daily goals from the saved profile only when explicitly asked.',
       executionMode: 'sequential',
       parameters: Type.Object({ statusText: activitySchema }, { additionalProperties: false }),
-      execute: async (callId) => withReceipt(callId, input, async () => {
+      execute: async (callId) => withReceipt(callId, input.threadId, async () => {
         const profile = await getGoalProfile();
         if (!profile) throw new Error('No saved goal profile is available. Ask for the missing profile values.');
         const before = await getDailyGoals();
@@ -443,7 +392,7 @@ function mealSummary(meal: Meal) {
   return {
     id: meal.id, revision: meal.revision, capturedAt: new Date(meal.capturedAt).toISOString(), status: meal.status,
     title: meal.analysis?.title, mealType: meal.analysis?.mealType, totals: meal.analysis?.totals,
-    research: meal.analysis?.research, note: meal.note, photoCount: meal.photos.length, clarification: meal.analysis?.clarification, error: meal.error,
+    research: meal.analysis?.research, note: meal.note, photoCount: meal.photos.length, clarification: meal.analysis?.clarification, questions: meal.questions, error: meal.error,
   };
 }
 
@@ -466,7 +415,7 @@ async function createCompleteMeal(mealId: string, params: CreateMealParams, atta
 }
 
 function requireMealEdit(params: EditMealParams): void {
-  const fields = [params.capturedAt, params.note, params.title, params.mealType, params.items, params.portionGrams, params.addAttachmentIds, params.removePhotoIds];
+  const fields = [params.capturedAt, params.note, params.title, params.mealType, params.items, params.portionGrams, params.addAttachmentIds, params.removePhotoIds, params.questions, params.resolutions];
   if (fields.every((value) => value === undefined)) throw new Error('No meal fields were provided to change.');
 }
 
@@ -481,9 +430,7 @@ function actionResult(actionId: string, label: string, value: unknown) {
   };
 }
 
-async function withReceipt<T>(callId: string, context: { threadId: string; deferMutations?: boolean }, execute: () => Promise<T>): Promise<T> {
-  if (context.deferMutations) throw new Error('The caller will save this calculation. Return the final meal JSON instead of changing data during analysis.');
-  const { threadId } = context;
+async function withReceipt<T>(callId: string, threadId: string, execute: () => Promise<T>): Promise<T> {
   const cached = await getChatToolReceipt(callId, threadId);
   if (cached !== undefined) return cached as T;
   const result = await execute();
@@ -534,8 +481,9 @@ async function copyAttachments(mealId: string, ids: string[], attachments: Map<s
   }));
 }
 
-function deleteUnreferencedPhotoFiles(candidates: MealPhoto[], retained: MealPhoto[]): void {
-  const retainedUris = new Set(retained.map((photo) => photo.uri));
+async function deleteUnreferencedPhotoFiles(candidates: MealPhoto[], retained: MealPhoto[]): Promise<void> {
+  if (!candidates.some(photo => !retained.some(current => current.uri === photo.uri))) return;
+  const retainedUris = await retainedInputPhotoUris();
   for (const photo of candidates) {
     if (retainedUris.has(photo.uri)) continue;
     try { new File(photo.uri).delete(); } catch { /* The database remains authoritative if cleanup fails. */ }

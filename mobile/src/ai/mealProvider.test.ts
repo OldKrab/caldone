@@ -1,72 +1,46 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { OPENAI_CODEX_MODELS } from '@earendil-works/pi-ai/providers/openai-codex.models';
-import type { AiDiagnosticEvent } from '../data/mealRepository';
-import { fixture, meals, token } from '../test/mealAgentFixture.ts';
+import { test } from 'node:test';
+import { fixture, client, meals, chat, conversation, savedMeal, rice, toolOutput, textOutput } from '../testing/mealAgentTestContext.ts';
 
-fixture.enabled = true;
-fixture.search = true;
-fixture.respond = async () => [
-  ...(fixture.search ? [{type: 'web_search_call', id: 's', status: 'completed', action: {sources: [{url: 'https://source.test/drink', title: 'Drink'}]}}] : []),
-  {type: 'message', id: 'msg', status: 'completed', role: 'assistant', content: [{type: 'output_text', text: '{"title":"Spritz"}', annotations: []}]},
-];
-const {refineMealAnalysis,analyzeMeal}=await import('./piClient.ts');
-const input={mealId:'meal',photos:[],previousJson:'{}',question:'How much?',answer:'Google it, I drank the whole bottle',language:'English' as const};
-test('real meal request forces search through Pi and returns provider evidence',async()=>{
-  const result=await refineMealAnalysis(input);
-  assert.deepEqual(fixture.payload.tool_choice,{type:'web_search'});
-  assert.equal(result.research.status,'completed');
-  assert.equal(result.research.sources[0].url,'https://source.test/drink');
-  assert.equal((await meals.listDiagnosticEvents()).find((event): event is AiDiagnosticEvent => event.operation === 'clarify' && !event.phase)?.searchStatus,'completed');
-});
-test('a provider that ignores forced search cannot return a successful meal estimate',async()=>{
-  fixture.search=false;
-  await assert.rejects(refineMealAnalysis(input),/search could not be verified/);
-  assert.equal((await meals.listDiagnosticEvents()).find((event): event is AiDiagnosticEvent => event.operation === 'clarify' && !event.phase)?.searchStatus,'not_searched');
-});
-test('disabled search remains disabled and is reported as unavailable',async()=>{
-  fixture.enabled=false;
-  const result=await refineMealAnalysis(input);
-  assert.equal(result.research.status,'unavailable');
-  assert.ok(fixture.payload.tools.every((tool: any) => tool.type === 'function'));
-  assert.equal(fixture.payload.tool_choice,'auto');
-});
+for (const scenario of ['observed', 'ignored', 'disabled'] as const) {
+  test(`agent nutrition search: ${scenario}`, async () => {
+    const meal = await savedMeal(`search-${scenario}`);
+    await client.setWebSearchEnabled('openai-codex', scenario !== 'disabled');
+    fixture.respond = async payload => payload.input.at(-1)?.type === 'function_call_output'
+      ? [textOutput('Search result handled.')]
+      : [...(scenario === 'observed' ? [{ type: 'web_search_call', id: 'search-1', status: 'completed',
+          action: { sources: [{ url: 'https://source.example/rice', title: 'Rice' }] } }] : []),
+        toolOutput('edit_meal', { mealId: meal.id, expectedRevision: meal.revision, items: [{ ...rice, calories: 140 }] }, `search-${scenario}`)];
+    await conversation.sendMealMessage(meal.id, 'Найди в интернете и уточни калорийность');
+    const saved = (await meals.getMeal(meal.id))!;
+    const thread = (await chat.preferredMealThread(meal.id, false))!;
+    const result = (await chat.loadChatMessages(thread.id)).find(m => m.role === 'toolResult' && m.toolName === 'edit_meal') as any;
+    if (scenario === 'ignored') {
+      assert.equal(result.isError, true);
+      assert.match(JSON.stringify(result.content), /search could not be verified/);
+      assert.equal(saved.revision, meal.revision);
+    } else {
+      assert.equal(result.isError, false);
+      assert.equal(saved.analysis!.research?.status, scenario === 'observed' ? 'completed' : 'unavailable');
+      assert.equal(saved.analysis!.totals.calories, 140);
+    }
+    assert.equal(fixture.requests[0].tools.some((t: any) => t.type === 'web_search'), scenario !== 'disabled');
+  });
+}
 
-test('test capture observes the real mobile Codex wire payload and parsed answer', async () => {
-  fixture.enabled = true;
-  fixture.search = false;
-  fixture.model = { ...Object.values(OPENAI_CODEX_MODELS).find(model => model.id === 'gpt-5.6-terra'), reasoning: false };
-  fixture.diagnostics.arm();
-  // React Native has no Node zlib; exercise Pi's actual uncompressed mobile path.
-  const getBuiltinModule = process.getBuiltinModule;
-  process.getBuiltinModule = ((name: string) => name === 'node:zlib' ? undefined : getBuiltinModule(name)) as typeof getBuiltinModule;
+test('provider search evidence survives an SSE response without a Content-Type header', async () => {
+  const meal = await savedMeal('missing-content-type');
+  await client.setWebSearchEnabled('openai-codex', true);
+  fixture.omitSseContentType = true;
+  fixture.respond = async payload => payload.input.at(-1)?.type === 'function_call_output'
+    ? [textOutput('Saved with verified search.')]
+    : [{ type: 'web_search_call', id: 'headerless-search', status: 'completed',
+      action: { sources: [{ url: 'https://source.example/rice', title: 'Rice nutrition' }] } },
+      toolOutput('edit_meal', { mealId: meal.id, expectedRevision: meal.revision, items: [{ ...rice, calories: 140 }] }, 'headerless-save')];
   try {
-    const result = await analyzeMeal({ mealId: 'photo-test', photos: [{ base64: 'aW1hZ2U=', mimeType: 'image/jpeg' }], language: 'Russian' });
-    assert.equal(fixture.trace.state, 'complete');
-    assert.equal(fixture.trace.requests[0].body.model, fixture.payload.model);
-    assert.deepEqual(fixture.trace.requests[0].body.input, fixture.payload.input);
-    assert.ok(JSON.stringify(fixture.trace.requests[0].body.input).includes('data:image/jpeg;base64,aW1hZ2U='));
-    assert.equal(fixture.trace.responses[0].text, result.text);
-    assert.equal(fixture.trace.responses[0].responseId, 'resp-test');
-    assert.equal(JSON.stringify(fixture.trace).includes(token), false);
-  } finally { process.getBuiltinModule = getBuiltinModule; }
-});
-
-test('a text-only meal actively requests search without making artwork a prerequisite for nutrition', async () => {
-  fixture.enabled = true;
-  fixture.search = false;
-  const result = await analyzeMeal({ mealId: 'text-image', photos: [], note: 'Two eggs on toast', language: 'English' });
-  assert.deepEqual(fixture.payload.tool_choice, { type: 'web_search' });
-  assert.equal(result.research.status, 'not_searched');
-  fixture.enabled = false;
-  await analyzeMeal({ mealId: 'text-offline', photos: [], note: 'Two eggs on toast', language: 'English' });
-  assert.ok(fixture.payload.tools.every((tool: any) => tool.type === 'function'));
-});
-
-test('automatic artwork search respects an explicit request not to search', async () => {
-  fixture.enabled = true;
-  for (const note of ['Two eggs. Do not search the web.', 'Два яйца. Не ищи в интернете.']) {
-    await analyzeMeal({ mealId: 'no-search', photos: [], note, language: 'English' });
-    assert.equal(fixture.payload.tool_choice, 'auto');
-  }
+    await conversation.sendMealMessage(meal.id, 'Погугли калорийность и обнови запись');
+    const saved = (await meals.getMeal(meal.id))!;
+    assert.equal(saved.analysis!.research?.status, 'completed');
+    assert.equal(saved.analysis!.research!.sources[0].url, 'https://source.example/rice');
+  } finally { fixture.omitSseContentType = false; }
 });

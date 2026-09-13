@@ -1,7 +1,8 @@
-import { requestMealReanalysis } from './src/services/mealReanalysis';
-import appConfig from './app.json';
-import { mealRequestDiagnostics } from './src/services/mealRequestTraceStore';
+import {pendingAgentTurn} from './src/data/agentTurnRepository';
+import {resumeMealConversation} from './src/services/mealConversation';
+import {retainedInputPhotoUris} from './src/data/chatRepository';
 import { submitMealAnswer, subscribeMealAnswers } from './src/services/mealAnswerSubmission';
+import { requestMealReanalysis } from './src/services/mealReanalysis';
 import { foregroundWorkActive, foregroundWorkBusy } from './src/services/foregroundWork';
 import { useAppUpdates } from './src/features/settings/useAppUpdates';
 import { DescribeMealScreen } from './src/features/capture/DescribeMealScreen';
@@ -49,13 +50,12 @@ import {
   createChatThread,
   deleteAllChatData,
   deleteChatThread,
-  ensureClarificationThread,
+  ensureMealThread,
   exportChatData,
   initializeChat,
   latestChatThread,
   listChatThreads,
   preferredMealThread,
-  syncMealQuestionsToThread,
 } from './src/data/chatRepository';
 import { mergeCalDoneBackup } from './src/data/backupRepository';
 import { color, type } from './src/design/tokens';
@@ -63,7 +63,7 @@ import { AppDialogProvider, useAppDialog } from './src/components/AppDialog';
 import { mealQuestions, type DailyGoals, type Meal, type MealAnalysis, type MealPhoto } from './src/domain/meal';
 import type { GoalProfile } from './src/domain/goalEstimator';
 import { analysisFromItems } from './src/domain/mealOperations';
-import type { ChatThread } from './src/domain/chat';
+import type { ChatThread, QuestionAnswer } from './src/domain/chat';
 import {
   BACKUP_FORMAT,
   BACKUP_SCHEMA_VERSION,
@@ -90,6 +90,7 @@ import { locale, setLocale, t, type Locale } from './src/i18n';
 import { registerMealBackgroundTask } from './src/services/backgroundMeals';
 import {
   answerMealClarification,
+  reanalyzeSavedMeal,
   applyNotificationPreferences,
   processMeal,
   processPendingMeals,
@@ -154,12 +155,9 @@ function CalDoneApp() {
     && photos.length === 0 && !note.trim() && !manualMeal && !additionMealId
     && mealActivities.size === 0 && answeringMealIds.size === 0 && !foregroundWorkBusy()
     && !meals.some(meal => meal.status === 'analyzing');
-  const updates = useAppUpdates({
-    ready,
+  const updates = useAppUpdates({ ready,
     canPrompt: () => authenticated && screen === 'home' && updateIdle(),
-    canInstall: () => authenticated
-      && (screen === 'home' || (screen === 'settings' && settingsSafe.current))
-      && updateIdle(),
+    canInstall: () => authenticated && (screen === 'home' || (screen === 'settings' && settingsSafe.current)) && updateIdle(),
   });
   const runDataWork = async (action: () => Promise<void>) => {
     dataWork.current++;
@@ -183,13 +181,6 @@ function CalDoneApp() {
   const refresh = useCallback(async () => {
     await finalizeExpiredClarifications();
     const [nextMeals, nextGoals, nextGoalProfile] = await Promise.all([listMeals(), getDailyGoals(), getGoalProfile()]);
-    await Promise.all(nextMeals.flatMap((meal) => {
-      const questions = mealQuestions(meal.analysis?.clarification);
-      if (questions.length === 0) return [];
-      return [ensureClarificationThread(meal.id, meal.analysis?.title ?? t('meal'))
-        .then((thread) => syncMealQuestionsToThread(thread.id, meal.id, questions, meal.capturedAt))
-        .catch(() => undefined)];
-    }));
     setMeals(nextMeals);
     setGoals(nextGoals);
     setGoalProfile(nextGoalProfile);
@@ -223,7 +214,6 @@ function CalDoneApp() {
       try {
         const parsed = new URL(url);
         if (parsed.protocol === 'caldone:' && parsed.hostname === 'capture') {
-          // Widget capture has no journal-date context and always starts today.
           setSelectedDay(startOfDay(Date.now()));
           setScreen('camera');
         }
@@ -332,7 +322,7 @@ function CalDoneApp() {
     })().catch(() => setReady(true));
   }, [refresh, refreshChats]);
 
-  // Refresh after completion even when the user has navigated away from capture.
+  // Capture may close before an addition finishes; refresh the current screen.
   useEffect(() => {
     if (ready) void refresh().catch(() => undefined);
   }, [dishAdditions, ready, refresh]);
@@ -399,6 +389,11 @@ function CalDoneApp() {
     if (remaining.length === 0) setScreen('camera');
   };
 
+  const discardUnusedInputPhotos = async (values: MealPhoto[]) => {
+    const retained=await retainedInputPhotoUris();
+    values.filter(photo=>!retained.has(photo.uri)).forEach(deletePhoto);
+  };
+
   const discardCapture = () => {
     if (sendInFlight.current) return;
     photos.forEach(deletePhoto);
@@ -435,9 +430,9 @@ function CalDoneApp() {
         storedPhotos.push({ ...photo, uri: destination.uri });
       }
       if (additionMealId) {
-        // The service owns the copied input now; capture can close before AI finishes.
         startDishAddition(additionMealId, { photos: storedPhotos, note: note.trim() });
         mealSaved = true;
+
         photos.forEach(deletePhoto);
         setPhotos([]);
         setNote('');
@@ -463,7 +458,7 @@ function CalDoneApp() {
       void applyNotificationPreferences(notificationPreferences, true);
       void processMeal(meal.id).finally(refresh);
     } catch (error) {
-      if (!mealSaved) storedPhotos.forEach(deletePhoto);
+      if (!mealSaved) await discardUnusedInputPhotos(storedPhotos);
       setCaptureError(additionMealId
         ? [t('addDishError'), error instanceof Error && [t('addDishChanged'), t('addDishNotReady')].includes(error.message) ? error.message : ''].filter(Boolean).join(' ')
         : t('saveError'));
@@ -474,13 +469,14 @@ function CalDoneApp() {
   };
 
   const retry = async (meal: Meal) => {
-    await queueMealRetry(meal.id);
-    await refresh();
-    await processMeal(meal.id).finally(refresh);
+    try {
+      if(await pendingAgentTurn({mealId:meal.id})) await resumeMealConversation(meal.id);
+      else await reanalyzeSavedMeal(meal.id);
+    } finally {await refresh();}
   };
 
-  const answer = (meal: Meal, value: string) => submitMealAnswer(meal.id, async () => {
-    try { await answerMealClarification(meal.id, value); }
+  const answer = (meal: Meal, value: string, references?: QuestionAnswer[]) => submitMealAnswer(meal.id, async () => {
+    try { await answerMealClarification(meal.id, value, references); }
     finally { await refresh(); }
   });
 
@@ -505,16 +501,16 @@ function CalDoneApp() {
       return;
     }
     selectedMeal.photos.forEach(deletePhoto);
-    await deleteMeal(selectedMeal.id);
     discardDishAddition(selectedMeal.id);
+    await deleteMeal(selectedMeal.id);
     setSelectedMealId(undefined);
     setScreen('home');
     await refresh();
   };
 
   const removeMealFromHome = async (meal: Meal) => {
-    await deleteMeal(meal.id);
     discardDishAddition(meal.id);
+    await deleteMeal(meal.id);
     meal.photos.forEach(deletePhoto);
     if (selectedMealId === meal.id) setSelectedMealId(undefined);
     await refresh();
@@ -728,13 +724,16 @@ function CalDoneApp() {
       file.write(JSON.stringify({
         exportedAt: new Date().toISOString(),
         processing: { foregroundServiceActive: foregroundWorkActive(), meals: (await listMeals()).map(meal => ({ status: meal.status, capturedAt: meal.capturedAt, error: meal.error })) },
-        testRequest: mealRequestDiagnostics.read(),
-        app: { version: appConfig.expo.version, platform: Platform.OS, platformVersion: Platform.Version },
+        app: { version: updates.installedVersion, platform: Platform.OS, platformVersion: Platform.Version },
         ai: { provider, model: model ?? 'automatic', thinkingLevel: thinkingLevel ?? 'automatic', webSearchEnabled },
         events: events.map((event) => {
           if (event.operation === 'layout' || event.operation === 'lifecycle' || event.operation === 'camera' || event.operation === 'web_search') return event;
-          if (event.operation === 'image_lookup') {
-            const { mealId: _mealId, ...metadata } = event;
+          if (event.operation === 'ai_request') {
+            const {mealId: _mealId, threadId: _threadId, ...metadata} = event;
+            return metadata;
+          }
+          if (event.operation === 'ai_tool' || event.operation === 'observer_error') {
+            const {threadId: _threadId, ...metadata} = event;
             return metadata;
           }
           const { outputText: _outputText, mealId: _mealId, threadId: _threadId, ...metadata } = event;
@@ -750,7 +749,6 @@ function CalDoneApp() {
 
   const removeSavedPhotos = async () => {
     discardAllDishAdditions();
-    mealRequestDiagnostics.clear();
     const removed = await removeAllMealPhotos();
     removed.forEach(deletePhoto);
     await refresh();
@@ -758,7 +756,6 @@ function CalDoneApp() {
 
   const removeAllSavedMeals = async () => {
     discardAllDishAdditions();
-    mealRequestDiagnostics.clear();
     const removed = await deleteAllMeals();
     removed.forEach(deletePhoto);
     await deleteAllChatData();
@@ -774,12 +771,7 @@ function CalDoneApp() {
   const openAssistant = async (mealId?: string) => {
     if (mealId) {
       const meal = meals.find((item) => item.id === mealId);
-      const clarification = Boolean(meal?.analysis?.clarification);
-      const thread = clarification
-        ? await ensureClarificationThread(mealId, meal?.analysis?.title ?? t('meal'))
-        : await preferredMealThread(mealId, false) ?? await createChatThread({ mealId, purpose: 'meal' });
-      const questions = mealQuestions(meal?.analysis?.clarification);
-      if (questions.length > 0) await syncMealQuestionsToThread(thread.id, mealId, questions, meal?.capturedAt);
+      const thread=await ensureMealThread(mealId,meal?.analysis?.title??t('meal'));
       setChatThread(thread);
       await refreshChats();
     }
@@ -860,6 +852,7 @@ function CalDoneApp() {
         <StatusBar style="light" />
         <CaptureReviewScreen
           addingDish={Boolean(additionMealId)}
+
           error={captureError}
           note={note}
           photos={photos}
@@ -959,7 +952,7 @@ function CalDoneApp() {
           onClearMealContext={() => setAssistantMealId(undefined)}
           onDataChanged={async () => { await refresh(); await refreshChats(); }}
           onHistory={() => { void refreshChats(); setScreen('chat_history'); }}
-          onNewChat={() => void createConversation(assistantMealId)}
+          onNewChat={() => void createConversation()}
           onModelSettings={() => setScreen('assistant_provider')}
           onUndo={undoAssistantAction}
         />
@@ -991,7 +984,7 @@ function CalDoneApp() {
             setScreen('camera');
           }}
           units={units}
-          onAnswer={(value) => answer(selectedMeal, value)}
+          onAnswer={(value,references) => answer(selectedMeal, value,references)}
           onAskAssistant={() => openAssistant(selectedMeal.id)}
           onBack={() => {
             setManualMeal(undefined);

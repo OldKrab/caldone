@@ -1,7 +1,7 @@
-import { MealProgress } from '../../components/MealProgress';
 import { buildActivityFeed, type ActivityTool } from './activityFeed';
+import { mealActivityLabel } from '../../components/MealWorkStatus';
 import { QuestionAnswers } from '../../components/QuestionAnswers';
-import { mealQuestionChoices } from '../../domain/mealQuestions';
+import { mealQuestionChoicesFor } from '../../domain/mealQuestions';
 import type { QuestionChoices } from '../../domain/questionChoices';
 import { AssistantError } from './AssistantError';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,11 +34,10 @@ import { useAppDialog } from '../../components/AppDialog';
 import { ScreenReveal } from '../../components/ScreenReveal';
 import { appendDiagnosticEvent, getPreference, savePreference } from '../../data/mealRepository';
 import { color, radius, space, type } from '../../design/tokens';
-import type { ChatAction, ChatAttachment, ChatMealQuestionMessage, ChatThread } from '../../domain/chat';
+import type { ChatAction, ChatAttachment, ChatMealQuestionMessage, ChatThread, QuestionAnswer } from '../../domain/chat';
 import { mealQuestions, type Meal } from '../../domain/meal';
 import { locale, formatTime, t } from '../../i18n';
 import { openChatSession, type ChatSession, type ChatSessionSnapshot } from '../../services/chatSession';
-import type { ProviderToolActivity } from '../../ai/providerActivity';
 import { userFacingToolActivity } from '../../ai/toolActivity';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { composerBottomSpace, keyboardAvoidingBehavior, keyboardAvoidingOffset, keyboardOccupiesWindow } from './composerPlacement';
@@ -168,20 +167,7 @@ export function AssistantScreen(props: {
     answeringMealIds: props.answeringMealIds,
     pendingMealQuestions: Object.fromEntries(props.meals.map(meal => [meal.id, mealQuestions(meal.analysis?.clarification)])),
   }), [snapshot, props.meals, props.answeringMealIds]);
-  const mealChoicesById = useMemo(() => new Map(props.meals.map(meal => [meal.id, mealQuestionChoices(meal.analysis?.clarification)])), [props.meals]);
-  const toolResults = useMemo(() => {
-    const results = new Map<string, Extract<AgentMessage, { role: 'toolResult' }>>();
-    for (const message of snapshot.messages) {
-      if (message.role === 'toolResult') results.set(message.toolCallId, message);
-    }
-    return results;
-  }, [snapshot.messages]);
-  // Pending calls belong only to the current user turn, never to older interrupted turns.
-  const currentTurnMessages = new Set(snapshot.messages.slice(snapshot.messages.findLastIndex((message) => message.role === 'chatUser' || message.role === 'user') + 1));
-  const streamingHasText = snapshot.streamingMessage?.role === 'assistant' && snapshot.streamingMessage.content.some((block) => block.type === 'text' && block.text.length > 0);
-  const streamingHasActivity = snapshot.streamingMessage?.role === 'assistant' && snapshot.streamingMessage.content.some((block) => block.type === 'toolCall');
-  const hasPendingTool = snapshot.messages.some((message) => currentTurnMessages.has(message) && message.role === 'assistant' && message.content.some((block) => block.type === 'toolCall' && !toolResults.has(block.id)));
-  const showWorking = snapshot.busy && !streamingHasText && !streamingHasActivity && !hasPendingTool && snapshot.providerActivities.length === 0;
+  const mealChoicesById = useMemo(() => new Map(props.meals.map(meal => [meal.id, mealQuestionChoicesFor(meal)])), [props.meals]);
   useEffect(() => {
     const timeout = setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 40);
     return () => clearTimeout(timeout);
@@ -204,9 +190,9 @@ export function AssistantScreen(props: {
   };
 
   // Button answers are separate messages; preserve any unsent composer text and photos.
-  const sendAnswer = async (answer: string) => {
+  const sendAnswer = async (answer: string, questionAnswers?: QuestionAnswer[]) => {
     if (!session) throw new Error('Session unavailable');
-    await session.send(answer, []);
+    await session.send(answer, [], {source:'form',questionAnswers});
   };
 
   const addImages = async (source: 'camera' | 'library') => {
@@ -313,8 +299,7 @@ export function AssistantScreen(props: {
               <EmptyAssistant selectedMeal={Boolean(props.selectedMeal)} onSuggestion={(value) => void send(value)} />
             ) : (
               feed.map((item) => item.kind === 'message'
-                ? <MessageRow key={item.key} message={item.message}
-                    activeQuestions={item.activeQuestions}
+                ? <MessageRow key={item.key} message={item.message} activeQuestions={item.activeQuestions}
                     choices={item.message.role === 'mealQuestion' ? mealChoicesById.get(item.message.mealId) : undefined}
                     disabled={!session || snapshot.busy || Boolean(snapshot.mealActivity)}
                     onAnswer={sendAnswer} />
@@ -322,13 +307,8 @@ export function AssistantScreen(props: {
                     disabled={!item.active || !session || Boolean(snapshot.mealActivity)}
                     onSubmit={sendAnswer} />
                 : item.kind === 'activity' ? <ActivityGroup key={item.key} tools={item.tools} />
+                : item.kind === 'progress' ? <WorkingRow key={item.key} label={snapshot.recovering ? (locale === 'ru' ? 'Восстанавливаю соединение…' : 'Reconnecting…') : mealActivityLabel(item.activity.stage)} startedAt={snapshot.workStartedAt} />
                 : <ActionRow key={item.key} action={item.action} busy={undoing === item.action.id} onUndo={() => void undo(item.action.id)} />)
-            )}
-            {snapshot.providerActivities.map((activity) => <ProviderActivityRow key={activity.id} activity={activity} />)}
-            {snapshot.mealActivity && <MealProgress mealId={props.selectedMeal?.id ?? props.thread.mealId} stage={snapshot.mealActivity} />}
-            {snapshot.recovering && <WorkingRow label={locale === 'ru' ? 'Восстанавливаю соединение…' : 'Reconnecting…'} />}
-            {showWorking && !snapshot.recovering && !snapshot.mealActivity && (
-              <MealProgress label={t('assistantWorking')} />
             )}
             {props.selectedMeal?.error && !snapshot.mealActivity && !snapshot.busy && !snapshot.error &&
               <AssistantError error={props.selectedMeal.error} />}
@@ -498,7 +478,7 @@ function MessageRow(props: {
   activeQuestions?: string[];
   choices?: QuestionChoices[];
   disabled?: boolean;
-  onAnswer: (answer: string) => Promise<void>;
+  onAnswer: (answer: string, references?: QuestionAnswer[]) => Promise<void>;
 }) {
   if (props.message.role === 'toolResult' || props.message.role === 'user') return null;
   if (props.message.role === 'mealQuestion') {
@@ -532,14 +512,14 @@ function MessageRow(props: {
   return <View style={styles.assistantMessage}>{props.message.content.map((block, index) => block.type === 'text' && block.text ? <AssistantMarkdown key={index}>{block.text}</AssistantMarkdown> : null)}</View>;
 }
 
-function ActivityGroup({ tools }: { tools: ActivityTool[] }) {
+export function ActivityGroup({ tools }: { tools: ActivityTool[] }) {
   const [expanded, setExpanded] = useState(false);
   const active = tools.some(tool => tool.status === 'running' || tool.status === 'preparing');
   const failed = tools.some(tool => tool.status === 'failed');
   const cancelled = tools.some(tool => tool.status === 'cancelled');
   if (tools.length === 1) return <ToolActivityRow tool={tools[0]} />;
-  const summary = active ? t('assistantWorking') : failed
-    ? (locale === 'ru' ? 'Есть невыполненные действия' : 'Some actions failed') : cancelled
+  const summary = active ? (locale === 'ru' ? 'Ход обработки' : 'Progress') : failed
+    ? (locale === 'ru' ? 'Были неудачные попытки' : 'Some attempts failed') : cancelled
     ? (locale === 'ru' ? 'Действия прерваны' : 'Actions interrupted')
     : (locale === 'ru' ? `Выполнено действий: ${tools.length}` : `${tools.length} actions completed`);
   // While collapsed, active and failed rows stay visible; successful details
@@ -557,36 +537,31 @@ function ActivityGroup({ tools }: { tools: ActivityTool[] }) {
 function ToolActivityRow({ tool }: { tool: ActivityTool }) {
   const active = tool.status === 'running' || tool.status === 'preparing';
   const failed = tool.status === 'failed';
-  const label = tool.status === 'preparing' ? (locale === 'ru' ? 'Подготавливаю действие…' : 'Preparing action…') : toolActivityLabel(tool.call.name, tool.call.arguments);
-  const status = tool.status === 'cancelled' ? (locale === 'ru' ? 'Прервано' : 'Cancelled') : failed ? (locale === 'ru' ? 'Не выполнено' : 'Failed') : '';
-  if (active) return <MealProgress label={label} />;
-  return <View>
-    <View accessibilityLabel={`${label}${status ? `. ${status}` : ''}`} style={styles.toolActivity}>
-      <Ionicons name={failed ? 'alert-circle-outline' : tool.status === 'cancelled' ? 'remove-circle-outline' : 'checkmark'} size={16} color={failed ? color.error : color.muted} />
-      <Text selectable style={[styles.toolActivityText, failed && styles.toolActivityError]}>{label}{status ? ` · ${status}` : ''}</Text>
-    </View>
+  const label = tool.status === 'preparing' ? (locale === 'ru' ? 'Подготавливаю действие…' : 'Preparing action…')
+    : tool.call.name === 'web_search' && tool.status === 'completed' ? (locale === 'ru' ? 'Поиск в интернете завершён' : 'Web search completed')
+    : toolActivityLabel(tool.call.name, tool.call.arguments);
+  const status = tool.status === 'cancelled' ? (locale === 'ru' ? 'Прервано' : 'Cancelled') : failed ? (locale === 'ru' ? 'Попытка не удалась' : 'Attempt failed') : '';
+  return <View><View accessibilityLabel={`${label}${status ? `. ${status}` : ''}`} style={styles.toolActivity}>
+    {active ? <ActivityIndicator color={color.action} size="small" /> : <Ionicons name={failed ? 'alert-circle-outline' : tool.status === 'cancelled' ? 'remove-circle-outline' : 'checkmark'} size={16} color={failed ? color.error : color.muted} />}
+    <Text selectable style={[styles.toolActivityText, failed && styles.toolActivityError]}>{label}{status ? ` · ${status}` : ''}</Text>
+  </View>
     {failed && tool.error && <AssistantError error={tool.error} />}
   </View>;
 }
 
-function ProviderActivityRow(props: { activity: ProviderToolActivity }) {
-  const failed = props.activity.status === 'error';
-  if (props.activity.status === 'active') return <MealProgress label={toolActivityLabel(props.activity.name, {})} />;
-  return (
-    <View accessibilityLabel={toolActivityLabel(props.activity.name, {})} style={styles.toolActivity}>
-      <Ionicons name={failed ? 'alert-circle-outline' : 'checkmark'} size={16} color={failed ? color.error : color.muted} />
-      <Text selectable numberOfLines={2} style={[styles.toolActivityText, failed && styles.toolActivityError]}>
-        {toolActivityLabel(props.activity.name, {})}
-      </Text>
-    </View>
-  );
-}
-
-function WorkingRow(props: { label: string }) {
+export function WorkingRow(props: { label: string; startedAt?: number }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (props.startedAt === undefined) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [props.startedAt]);
+  const seconds = Math.max(0, Math.floor((now - (props.startedAt ?? now)) / 1000));
   return (
     <View style={styles.working}>
       <ActivityIndicator color={color.action} size="small" />
-      <Text selectable style={styles.workingText}>{props.label}</Text>
+      <Text selectable accessibilityLiveRegion="polite" style={[styles.workingText, {flex: 1}]}>{props.label}</Text>
+      {props.startedAt !== undefined && <Text style={styles.elapsed}>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}</Text>}
     </View>
   );
 }
@@ -694,6 +669,7 @@ const styles = StyleSheet.create({
   questionMessageLabel: { color: color.pending, fontFamily: type.ticketBold, fontSize: 13, letterSpacing: 0.35, marginBottom: 3 },
   questionMessageText: { color: color.ink, fontSize: 16, fontWeight: '600', lineHeight: 22, marginTop: 5 },
   working: { alignItems: 'center', flexDirection: 'row', gap: space.sm, paddingVertical: space.sm },
+  elapsed: { color: color.muted, fontSize: 12, fontVariant: ['tabular-nums'] },
   workingText: { color: color.muted, fontSize: 13 },
   toolActivity: { alignItems: 'center', flexDirection: 'row', gap: space.sm, minHeight: 34, paddingVertical: 6 },
   toolActivityText: { color: color.muted, flexShrink: 1, fontSize: 13 },

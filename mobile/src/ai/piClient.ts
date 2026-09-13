@@ -1,24 +1,16 @@
-import { declinesWebSearch } from '../domain/mealResearch';
-import { mealRequestDiagnostics } from '../services/mealRequestTraceStore';
-import type { MealRequestCapture } from './mealRequestTrace';
 import { trackedSearchFetch, withHostedSearch } from './hostedSearch';
+import { agentRequestStream } from './agentRequestStream';
+import { requestDiagnostics } from './requestDiagnostics';
 import { restoreChatMealPhotos } from './chatMealPhotos';
-import { acceptMealResearch, MealResearchError } from './mealResearchResult';
-import { explicitlyRequestsSearch, type MealResearch } from '../domain/mealResearch';
-import { requestWithDeadline } from '../services/requestDeadline';
-import { mealInputContent } from './mealInput';
-import { AppState } from 'react-native';
-import { continuationMessages, isConnectionError } from '../services/connectionRecovery';
-import { waitForConnectionRecovery } from '../services/foregroundRecovery';
+import type { MealResearch } from '../domain/mealResearch';
 import {
   contentText,
   createModels,
   getSupportedThinkingLevels,
+  InMemoryModelsStore,
   type AuthEvent,
   type AuthPrompt,
   type AuthType,
-  type AssistantMessage,
-  type Context,
   type ImageContent,
   type Message,
   type Model,
@@ -30,22 +22,13 @@ import { fetch as expoFetch } from 'expo/fetch';
 import { File } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 
-import { buildChatPrompt } from './chatPrompt';
-import { buildMealClarificationContent } from './mealClarificationContent';
 import { installPiMobileRuntime } from './mobileRuntime';
-import {
-  buildMealAnalysisPrompt,
-  MEAL_ANALYSIS_PROMPT_VERSION,
-  buildMealRefinementPrompt,
-  buildMealCorrectionPrompt,
-} from './mealAnalysisPrompt';
 import { mobilePiProviders } from './mobileProviders';
 import { openaiCodexMobileProvider } from './openaiCodexMobileProvider';
 import { fetchWithProviderActivity, type ProviderToolActivity } from './providerActivity';
 import { SecureCredentialStore } from './secureCredentialStore';
-import { appendDiagnosticEvent, type AiDiagnosticEvent } from '../data/mealRepository';
+import { appendDiagnosticEvent } from '../data/mealRepository';
 import type { ChatMealQuestionMessage, ChatUserMessage } from '../domain/chat';
-import { completedChatContext } from '../domain/chat';
 import { webSearchPreference } from './providerPreferences';
 
 const PROVIDER_ID = 'openai-codex';
@@ -67,11 +50,51 @@ const TOOL_CAPABLE_APIS = new Set([
 installPiMobileRuntime();
 
 const credentials = new SecureCredentialStore();
-const models = createModels({ credentials });
+// Account-specific catalogs live only for this app session. Refresh before the
+// first request after restart; never reuse another account's model availability.
+const modelsStore = new InMemoryModelsStore();
+const models = createModels({ credentials, modelsStore });
 for (const provider of mobilePiProviders()) models.setProvider(provider);
-// The bundled Codex provider expects a desktop callback server. Replace only
-// that auth seam with the app's browser/deep-link implementation.
 models.setProvider(openaiCodexMobileProvider());
+let catalogRefresh: Promise<void> | undefined;
+let catalogRefreshedAt = 0;
+
+/** Settings force a fresh list; requests share an in-flight refresh and reuse a
+ * successful catalog for five minutes. Pi retains the last list on failure. */
+export function refreshProviderModels(force = false): Promise<void> {
+  if (catalogRefresh) return catalogRefresh;
+  if (!force && Date.now() - catalogRefreshedAt < 5 * 60_000) return Promise.resolve();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  const task = models.refresh({ providers: [PROVIDER_ID], signal: controller.signal }).then(result => {
+    if (result.aborted) throw new Error('Loading Codex models was interrupted');
+    const error = result.errors.get(PROVIDER_ID);
+    if (error) throw error;
+    catalogRefreshedAt = Date.now();
+  }).finally(() => {
+    clearTimeout(timeout);
+    if (catalogRefresh === task) catalogRefresh = undefined;
+  });
+  catalogRefresh = task;
+  return task;
+}
+
+async function resetCodexCatalog(): Promise<void> {
+  // Replacing the provider cancels its old refresh and prevents stale publication.
+  models.setProvider(openaiCodexMobileProvider());
+  await catalogRefresh?.catch(() => undefined);
+  await modelsStore.delete(PROVIDER_ID);
+  catalogRefreshedAt = 0;
+}
+
+async function ensureModelCatalog(providerId: string): Promise<void> {
+  if (providerId !== PROVIDER_ID) return;
+  await refreshProviderModels().catch(error => {
+    // A temporary outage may use this account's last successfully loaded list.
+    // With no list, fail explicitly instead of guessing a bundled model ID.
+    if (!models.getModels(providerId).length) throw error;
+  });
+}
 
 export type LoginCallbacks = {
   onEvent(event: AuthEvent): void;
@@ -89,7 +112,9 @@ export async function signInWithBrowser(
 }
 
 export async function signOut(): Promise<void> {
-  await models.logout(await selectedProviderId());
+  const providerId = await selectedProviderId();
+  await models.logout(providerId);
+  if (providerId === PROVIDER_ID) await resetCodexCatalog();
 }
 
 export type ProviderOption = {
@@ -110,7 +135,8 @@ export type ModelOption = {
 
 export function getProviderOptions(): ProviderOption[] {
   return models.getProviders()
-    .filter((provider) => provider.getModels().some((model) => model.input.includes('image')))
+    // Codex must remain connectable before its authenticated catalog is loaded.
+    .filter((provider) => provider.id === PROVIDER_ID || provider.getModels().some((model) => model.input.includes('image')))
     .map((provider) => {
       const imageModels = provider.getModels().filter((model) => model.input.includes('image'));
       const automaticModel = PREFERRED_IMAGE_MODELS
@@ -218,45 +244,17 @@ async function modelRequestOptions(model: Model<string>) {
   return { ...toolOptions, ...(reasoning ? { reasoning } : {}) };
 }
 
-async function recordAiDiagnostic(input: {
-  operation: AiDiagnosticEvent['operation'];
-  mealId: string;
-  model: Model<string>;
-  startedAt: number;
-  response?: AssistantMessage & { executedTools?: string[] };
-  error?: unknown;
-  research?: MealResearch;
-}): Promise<void> {
-  const selectedModelId = await getSelectedModel(input.model.provider);
-  const [thinkingLevel, webSearchEnabled] = await Promise.all([
-    getThinkingLevel(input.model.provider, selectedModelId),
-    getWebSearchEnabled(input.model.provider),
-  ]);
-  const response = input.response;
-  const toolNames = response?.executedTools ?? response?.content.flatMap((block) => block.type === 'toolCall' ? [block.name] : []) ?? [];
-  const outputText = response ? contentText(response.content) : undefined;
-  await appendDiagnosticEvent({
-    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`,
-    createdAt: Date.now(),
-    operation: input.operation,
-    appState: AppState.currentState,
-    mealId: input.mealId,
-    provider: input.model.provider,
-    model: input.model.id,
-    api: input.model.api,
-    promptVersion: MEAL_ANALYSIS_PROMPT_VERSION,
-    thinkingLevel,
-    webSearchEnabled,
-    durationMs: Date.now() - input.startedAt,
-    responseId: response?.responseId,
-    stopReason: response?.stopReason,
-    usage: response?.usage,
-    contentTypes: response?.content.map((block) => block.type),
-    toolNames,
-    searchStatus: input.research?.status ?? (input.error instanceof MealResearchError ? input.error.research.status : undefined),
-    outputText,
-    error: input.error instanceof Error ? input.error.message.slice(0, 1000) : input.error ? String(input.error).slice(0, 1000) : response?.errorMessage,
-  }).catch(() => undefined);
+function diagnosticRequestOptions(model: Model<string>, scope: {mealId?: string; threadId?: string}, options: ModelsSimpleStreamOptions): ModelsSimpleStreamOptions {
+  const trace = requestDiagnostics({provider: model.provider, model: model.id, api: model.api, ...scope}, appendDiagnosticEvent);
+  return {
+    ...options,
+    onPayload: async (payload, activeModel) => {
+      const transformed = await options.onPayload?.(payload, activeModel) ?? payload;
+      await trace.onPayload(transformed);
+      return transformed;
+    },
+    fetch: trace.wrapFetch(options.fetch ?? expoFetch as typeof globalThis.fetch),
+  };
 }
 
 export async function connectProvider(
@@ -273,9 +271,8 @@ export async function connectProvider(
     },
     notify: callbacks.onEvent,
   });
-  await SecureStore.setItemAsync(SELECTED_PROVIDER_KEY, providerId).catch((error) => {
-    throw new Error('Provider selection save failed', { cause: error });
-  });
+  await SecureStore.setItemAsync(SELECTED_PROVIDER_KEY, providerId);
+  if (providerId === PROVIDER_ID) await resetCodexCatalog();
 }
 
 async function selectedProviderId(): Promise<string> {
@@ -284,10 +281,12 @@ async function selectedProviderId(): Promise<string> {
 
 async function imageModel() {
   const providerId = await selectedProviderId();
+  await ensureModelCatalog(providerId);
   const selectedModelId = await getSelectedModel(providerId);
   if (selectedModelId) {
     const selected = models.getModel(providerId, selectedModelId);
     if (selected?.input.includes('image')) return selected;
+    if (providerId === PROVIDER_ID) throw new Error('The selected Codex model is unavailable. Choose another model in AI settings.');
   }
   for (const modelId of PREFERRED_IMAGE_MODELS) {
     const model = models.getModel(providerId, modelId);
@@ -303,10 +302,12 @@ async function imageModel() {
 
 async function textModel() {
   const providerId = await selectedProviderId();
+  await ensureModelCatalog(providerId);
   const selectedModelId = await getSelectedModel(providerId);
   if (selectedModelId) {
     const selected = models.getModel(providerId, selectedModelId);
     if (selected?.input.includes('text')) return selected;
+    if (providerId === PROVIDER_ID) throw new Error('The selected Codex model is unavailable. Choose another model in AI settings.');
   }
   for (const modelId of PREFERRED_IMAGE_MODELS) {
     const model = models.getModel(providerId, modelId);
@@ -326,8 +327,9 @@ export async function createChatAgent(input: {
   tools: AgentTool[];
   sessionId: string;
   onProviderActivity?: (activity: ProviderToolActivity) => void;
+  onResearch?: (research: MealResearch) => Promise<void> | void;
 }): Promise<Agent> {
-  const model = await textModel();
+  const model = await imageModel();
   if (!TOOL_CAPABLE_APIS.has(model.api)) {
     throw new Error('The selected model does not expose a supported tool-calling API');
   }
@@ -336,7 +338,9 @@ export async function createChatAgent(input: {
     model.reasoning ? getThinkingLevel(model.provider, selectedModelId) : undefined,
     hostedToolOptions(model),
   ]);
-  return createRuntimeAgent({
+  const baseFetch=toolOptions.onPayload?fetchWithProviderActivity(input.onProviderActivity):expoFetch as typeof globalThis.fetch;
+  const search=input.onResearch?trackedSearchFetch(baseFetch):undefined;
+  const agent = new Agent({
     initialState: {
       systemPrompt: input.systemPrompt,
       messages: input.messages,
@@ -345,23 +349,22 @@ export async function createChatAgent(input: {
       tools: input.tools,
     },
     sessionId: input.sessionId,
+    toolExecution: 'sequential',
+    transport: 'sse',
+    convertToLlm: convertChatMessages,
     onPayload: toolOptions.onPayload,
-    streamFn: (activeModel, context, options) => models.streamSimple(activeModel, context, {
+    streamFn: (activeModel, context, options) => agentRequestStream(activeModel, signal => models.streamSimple(activeModel, context, diagnosticRequestOptions(activeModel, {threadId: input.sessionId}, {
       ...options,
-      fetch: toolOptions.onPayload
-        ? fetchWithProviderActivity(input.onProviderActivity)
-        : expoFetch as typeof globalThis.fetch,
+      signal,
+      fetch: search?.fetch ?? baseFetch,
       transport: 'sse',
-    }),
+    })), options?.signal),
   });
-}
-
-/** Chat and meal analysis share provider conversion, validated sequential tools
- * and Pi's conversation loop. Callers own persistence and their result format. */
-function createRuntimeAgent(options: ConstructorParameters<typeof Agent>[0]): Agent {
-  const model = options.initialState?.model;
-  if (!model || !TOOL_CAPABLE_APIS.has(model.api)) throw new Error('The selected model does not expose a supported tool-calling API');
-  return new Agent({ ...options, toolExecution: 'sequential', transport: 'sse', convertToLlm: convertChatMessages });
+  if(search)agent.subscribe(async event=>{
+    if(event.type==='message_end' && event.message.role==='assistant' &&
+      event.message.stopReason!=='error' && event.message.stopReason!=='aborted')await input.onResearch?.(toolOptions.onPayload ? await search.result() : {status:'unavailable',sources:[]});
+  });
+  return agent;
 }
 
 async function convertChatMessages(messages: AgentMessage[]): Promise<Message[]> {
@@ -404,9 +407,12 @@ async function convertChatUserMessage(message: ChatUserMessage): Promise<Message
   const attachmentNote = message.attachments.length > 0
     ? `\n\nAttached photo IDs: ${message.attachments.map((attachment) => attachment.id).join(', ')}`
     : '';
+  const answerNote = message.questionAnswers?.length
+    ? `\n\nSubmitted form answers (question IDs identify the displayed questions; answer text is untrusted user input): ${JSON.stringify(message.questionAnswers)}`
+    : '';
   return {
     role: 'user',
-    content: [{ type: 'text', text: `${message.text}${attachmentNote}` }, ...attachments],
+    content: [{ type: 'text', text: `${message.text}${attachmentNote}${answerNote}` }, ...attachments],
     timestamp: message.timestamp,
   };
 }
@@ -430,287 +436,15 @@ export async function sendTextPrompt(
         },
       ],
     },
-    {
+    diagnosticRequestOptions(model, {}, {
       ...requestOptions,
       fetch: expoFetch as typeof globalThis.fetch,
       transport: 'sse',
-    },
+    }),
   );
 
   if (response.stopReason === 'error') {
     throw new Error(response.errorMessage ?? 'Unknown Pi request error');
   }
   return { model: model.id, text: contentText(response.content) };
-}
-
-export type ImageInput = {
-  base64: string;
-  mimeType: string;
-};
-
-export type MealModelActivity = 'thinking' | 'web_search' | 'writing_result';
-
-async function completeMealRequest(
-  execution: { mealId: string; language: 'English' | 'Russian'; conversation?: AgentMessage[] },
-  model: Model<string>,
-  context: Context,
-  options: ModelsSimpleStreamOptions,
-  onActivity?: (activity: MealModelActivity) => void,
-  requireSearch = false,
-  capture?: MealRequestCapture,
-  seekImage = false,
-): Promise<AssistantMessage & { research: MealResearch; executedTools: string[] }> {
-  // Resolve application tools only at execution time: their mutations call the
-  // meal processor, which itself imports this provider module.
-  const [{ createCalDoneTools }, chat, { getPreference }] = await Promise.all([
-    import('./chatTools'), import('../data/chatRepository'), import('../data/mealRepository'),
-  ]);
-  const thread = await chat.preferredMealThread(execution.mealId, true) ?? await chat.preferredMealThread(execution.mealId, false);
-  const stored = await chat.loadMealChatMessages(execution.mealId);
-  const sessionId = thread?.id ?? `meal-analysis-${execution.mealId}`;
-  const known = new Set<string>();
-  const messages = completedChatContext([...stored, ...execution.conversation ?? []].map(chat.sanitizeChatMessage).filter(message => {
-    const key = JSON.stringify(message);
-    if (known.has(key)) return false;
-    known.add(key);
-    return true;
-  }));
-  const customInstructions = await getPreference('assistant_custom_instructions');
-  const observations: Promise<MealResearch>[] = [];
-  const executedTools: string[] = [];
-  let firstResponse = true;
-  let agent: Agent;
-  agent = createRuntimeAgent({
-    initialState: {
-      model, messages, thinkingLevel: options.reasoning ?? 'off',
-      systemPrompt: `${buildChatPrompt({ language: execution.language, selectedMealId: execution.mealId, now: Date.now(), customInstructions })}
-
-Current task: calculate the specified meal using the same CalDone tools as chat. Search meal history, read relevant saved records and open their photos when useful, especially when the user refers to a previous meal. Earlier portions are not proof of the current portion. The caller owns saving this result; return the calculation instead of invoking data-changing tools or recursively invoking meal analysis. If clarification is needed, return its questions and choices with your estimate in the final meal JSON. Do not finish with conversational prose.
-${context.systemPrompt}`,
-      tools: createCalDoneTools({
-        threadId: sessionId, getMessages: () => agent.state.messages,
-        attachments: new Map(messages.flatMap(message => message.role === 'chatUser' ? message.attachments.map(photo => [photo.id, photo] as const) : [])),
-        onDataChanged: async () => {}, deferMutations: true,
-      }),
-    },
-    sessionId,
-    streamFn: (activeModel, nextContext, agentOptions) => {
-      const requestFetch = capture ? capture.wrapFetch(options.fetch ?? expoFetch as typeof globalThis.fetch) : options.fetch ?? expoFetch as typeof globalThis.fetch;
-      const tracked = trackedSearchFetch(requestFetch, activity => {
-        if (activity.status === 'active') onActivity?.('web_search');
-      });
-      const forceSearch = firstResponse && (requireSearch || seekImage);
-      const stream = models.streamSimple(activeModel, nextContext, {
-        ...options, ...agentOptions,
-        onPayload: options.onPayload ? payload => withHostedSearch(payload, forceSearch) : undefined,
-        fetch: options.onPayload ? tracked.fetch : requestFetch, transport: 'sse',
-      });
-      observations.push(stream.result().then(async response => {
-        capture?.response({text: contentText(response.content), responseId: response.responseId, stopReason: response.stopReason, error: response.errorMessage});
-        if (response.stopReason === 'error' || response.stopReason === 'aborted') return {status: 'unobserved', sources: []};
-        firstResponse = false;
-        return options.onPayload ? tracked.result() : {status: 'unavailable', sources: []};
-      }));
-      return stream;
-    },
-  });
-  const unsubscribe = agent.subscribe(event => {
-    if (event.type === 'message_update') {
-      if (event.assistantMessageEvent.type === 'thinking_start') onActivity?.('thinking');
-      if (event.assistantMessageEvent.type === 'text_start') onActivity?.('writing_result');
-    } else if (event.type === 'tool_execution_start') {
-      executedTools.push(event.toolName);
-      onActivity?.('thinking');
-    }
-  });
-  try {
-    await requestWithDeadline(async signal => {
-      const abort = () => agent.abort();
-      signal.addEventListener('abort', abort, { once: true });
-      try {
-        signal.throwIfAborted();
-        await agent.prompt(context.messages);
-        if (isConnectionError(agent.state.errorMessage)) {
-          const remaining = continuationMessages(agent.state.messages);
-          if (remaining) {
-            await waitForConnectionRecovery(signal);
-            signal.throwIfAborted();
-            agent.state.messages = remaining;
-            await agent.continue();
-          }
-        }
-        signal.throwIfAborted();
-        if (agent.state.errorMessage) throw new Error(agent.state.errorMessage);
-      } finally { signal.removeEventListener('abort', abort); }
-    }, options.signal);
-    const response = agent.state.messages.at(-1);
-    if (response?.role !== 'assistant' || response.stopReason !== 'stop') throw new Error('Meal analysis did not return a completed result');
-    const results = await Promise.all(observations);
-    const sources = new Map(results.flatMap(result => result.sources.map(source => [source.url, source] as const)));
-    // Research belongs to the whole tool loop, not just its last prose/JSON turn.
-    const status = results.some(result => result.status === 'completed') ? 'completed'
-      : results.some(result => result.status === 'failed') ? 'failed'
-      : results.some(result => result.status === 'not_searched') ? 'not_searched'
-      : options.onPayload ? 'unobserved' : 'unavailable';
-    const research: MealResearch = {status, sources: [...sources.values()]};
-    acceptMealResearch(research, requireSearch);
-    return {...response, research, executedTools};
-  } finally { unsubscribe(); agent.abort(); }
-}
-
-export async function analyzeMeal(input: {
-  conversation?: AgentMessage[];
-  signal?: AbortSignal;
-  existingMeal?: import('../domain/meal').MealAnalysis;
-  requireSearch?: boolean;
-  assistantInterpretation?: string;
-  photos: ImageInput[];
-  note?: string;
-  language: 'English' | 'Russian';
-  mealId: string;
-  onActivity?: (activity: MealModelActivity) => void;
-}): Promise<{ model: string; text: string; research: MealResearch }> {
-  // Reserve before awaiting model/auth selection so a second meal cannot take the capture.
-  let capture: MealRequestCapture | undefined;
-  try { capture = mealRequestDiagnostics.begin({ mealId: input.mealId, sourcePhotos: input.photos, note: input.note, promptVersion: MEAL_ANALYSIS_PROMPT_VERSION }); } catch { /* Optional diagnostics must not block analysis. */ }
-  try {
-    const content = mealInputContent(input);
-    if (input.assistantInterpretation) content.push({type:'text',text:JSON.stringify({assistantInterpretation:input.assistantInterpretation})});
-    const model = input.photos.length > 0 ? await imageModel() : await textModel();
-    const requestOptions = await modelRequestOptions(model);
-    const startedAt = Date.now();
-    await appendDiagnosticEvent({ id: `${startedAt.toString(36)}-analysis-start`, createdAt: startedAt, operation: 'analyze', phase: 'started', mealId: input.mealId, appState: AppState.currentState, provider: model.provider, model: model.id, api: model.api, promptVersion: MEAL_ANALYSIS_PROMPT_VERSION, webSearchEnabled: await getWebSearchEnabled(model.provider), durationMs: 0 });
-    let response: AssistantMessage & { research: MealResearch };
-    try {
-      response = await completeMealRequest(
-        input, model,
-        {
-          systemPrompt: buildMealAnalysisPrompt(input.language, Boolean(input.existingMeal)),
-          messages: [
-            {
-              role: 'user',
-              content,
-              timestamp: Date.now(),
-            },
-          ],
-        },
-        {
-          ...requestOptions,
-          signal: input.signal,
-          // React Native's built-in fetch historically lacked a streaming body.
-          // Expo's implementation supplies the ReadableStream contract Pi consumes.
-          fetch: expoFetch as typeof globalThis.fetch,
-          transport: 'sse',
-        },
-        input.onActivity,
-        input.requireSearch ?? explicitlyRequestsSearch(input.note ?? ''),
-        capture,
-        input.photos.length === 0 && !declinesWebSearch(input.note ?? ''),
-      );
-      await recordAiDiagnostic({ operation: 'analyze', mealId: input.mealId, model, startedAt, response, research: response.research });
-    } catch (error) {
-      await recordAiDiagnostic({ operation: 'analyze', mealId: input.mealId, model, startedAt, error });
-      throw error;
-    }
-
-    if (response.stopReason === 'error') {
-      throw new Error(response.errorMessage ?? 'Unknown Pi request error');
-    }
-
-    capture?.finish();
-    return { model: model.id, text: contentText(response.content), research: response.research };
-  } catch (error) {
-    capture?.finish(error);
-    throw error;
-  }
-}
-
-export async function refineMealAnalysis(input: {
-  conversation?: AgentMessage[];
-  requireSearch?: boolean;
-  assistantInterpretation?: string;
-  mealId: string;
-  signal?: AbortSignal;
-  previousJson: string;
-  photos: ImageInput[];
-  note?: string;
-  question: string;
-  answer: string;
-  language: 'English' | 'Russian';
-  onActivity?: (activity: MealModelActivity) => void;
-}): Promise<{ model: string; text: string; research: MealResearch }> {
-  const model = input.photos.length > 0 ? await imageModel() : await textModel();
-  const requestOptions = await modelRequestOptions(model);
-  const startedAt = Date.now();
-  let response: AssistantMessage & { research: MealResearch };
-  try {
-    response = await completeMealRequest(
-      input, model,
-      {
-        systemPrompt: buildMealRefinementPrompt(input.language),
-        messages: [{
-          role: 'user',
-          content: buildMealClarificationContent(input),
-          timestamp: Date.now(),
-        }],
-      },
-      { ...requestOptions, signal: input.signal, fetch: expoFetch as typeof globalThis.fetch, transport: 'sse' },
-      input.onActivity,
-      input.requireSearch ?? explicitlyRequestsSearch(input.answer),
-    );
-    await recordAiDiagnostic({ operation: 'clarify', mealId: input.mealId, model, startedAt, response, research: response.research });
-  } catch (error) {
-    await recordAiDiagnostic({ operation: 'clarify', mealId: input.mealId, model, startedAt, error });
-    throw error;
-  }
-
-  if (response.stopReason === 'error') {
-    throw new Error(response.errorMessage ?? 'Unknown Pi request error');
-  }
-  return { model: model.id, text: contentText(response.content), research: response.research };
-}
-
-export async function correctMealAnalysis(input: {
-  conversation?: AgentMessage[];
-  requireSearch?: boolean;
-  mealId: string;
-  previousJson: string;
-  correction: string;
-  language: 'English' | 'Russian';
-  onActivity?: (activity: MealModelActivity) => void;
-}): Promise<{ model: string; text: string; research: MealResearch }> {
-  const correction = input.correction.trim();
-  if (!correction) throw new Error('A correction is required');
-  const model = await textModel();
-  const requestOptions = await modelRequestOptions(model);
-  const startedAt = Date.now();
-  let response: AssistantMessage & { research: MealResearch };
-  try {
-    response = await completeMealRequest(
-      input, model,
-      {
-        systemPrompt: buildMealCorrectionPrompt(input.language),
-        messages: [{
-          role: 'user',
-          content: [{
-            type: 'text',
-            text: `Existing meal JSON:\n${input.previousJson}\n\nCorrection: ${correction}`,
-          }],
-          timestamp: Date.now(),
-        }],
-      },
-      { ...requestOptions, fetch: expoFetch as typeof globalThis.fetch, transport: 'sse' },
-      input.onActivity,
-      input.requireSearch ?? explicitlyRequestsSearch(input.correction),
-    );
-    await recordAiDiagnostic({ operation: 'correct', mealId: input.mealId, model, startedAt, response, research: response.research });
-  } catch (error) {
-    await recordAiDiagnostic({ operation: 'correct', mealId: input.mealId, model, startedAt, error });
-    throw error;
-  }
-
-  if (response.stopReason === 'error') {
-    throw new Error(response.errorMessage ?? 'Unknown Pi request error');
-  }
-  return { model: model.id, text: contentText(response.content), research: response.research };
 }

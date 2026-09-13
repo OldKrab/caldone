@@ -124,14 +124,6 @@ test('image lookup uses relevant search results without optional model hints and
   assert.deepEqual(analysis.webImage, { ...artwork, sourceUrl: fallback });
 });
 
-test('answering a portion question preserves artwork, but changing the food does not', async () => {
-  const { mergeDishClarification } = await import('../domain/mealAddition.ts');
-  const previous = await parseMealResult(result, false, async () => page());
-  const answer = await parseMealResult({ text: JSON.stringify({ ...meal, items: [{ ...meal.items[0], quantity: '3 eggs' }] }) }, false);
-  assert.deepEqual(mergeDishClarification(previous, answer).webImage, artwork);
-  const changed = { ...answer, items: [{ ...answer.items[0], name: 'Chocolate cake' }] };
-  assert.equal(mergeDishClarification(previous, changed).webImage, undefined);
-});
 
 test('a generic menu source can supply a labelled food photo, but not its site preview', async () => {
   const searched = { text: JSON.stringify(meal), research: { status: 'completed' as const, sources: [{ url: sourceUrl, title: 'Restaurant menu' }] } };

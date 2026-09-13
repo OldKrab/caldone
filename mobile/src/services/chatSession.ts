@@ -1,13 +1,18 @@
 import { confirmationForTurn } from './mealConfirmation';
 import { submitMealAnswer } from './mealAnswerSubmission';
+import { runAgentTurn } from './agentTurn';
+import { readAgentQuestions, subscribeAgentQuestions } from '../data/agentQuestionRepository';
+import type { AgentQuestion } from '../domain/agentQuestion';
+import { pendingAgentTurn, recordAgentResearch } from '../data/agentTurnRepository';
 import type { ToolExecution } from '../features/chat/activityFeed';
+import { readProviderActivities, retainProviderActivities, type ChatProviderActivity } from '../domain/chatActivity';
 import { AppState } from 'react-native';
 import type { Agent, AgentMessage } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { File } from 'expo-file-system';
 
 import { createChatAgent, getThinkingLevel, getWebSearchEnabled } from '../ai/piClient';
-import type { ProviderToolActivity } from '../ai/providerActivity';
+import { recordToolDiagnostic } from '../ai/requestDiagnostics';
 import { createCalDoneTools } from '../ai/chatTools';
 import { buildChatPrompt, CHAT_PROMPT_VERSION } from '../ai/chatPrompt';
 import {
@@ -20,12 +25,9 @@ import {
   saveChatMessages,
 } from '../data/chatRepository';
 import { appendDiagnosticEvent, deleteMeal, getDailyGoals, getGoalProfile, getMeal, getPreference, removePreference, replaceMeal, saveDailyGoals, saveGoalProfile } from '../data/mealRepository';
-import type { ChatAction, ChatAttachment, ChatThread, ChatUserMessage } from '../domain/chat';
-import { mealQuestions } from '../domain/meal';
+import type { ChatAction, ChatAttachment, ChatThread, ChatUserMessage, ChatSendOptions } from '../domain/chat';
 import { locale } from '../i18n';
-import { continuationMessages, isConnectionError } from './connectionRecovery';
-import { waitForConnectionRecovery } from './foregroundRecovery';
-import { subscribeMealActivity, type MealActivityStage } from './mealActivity';
+import { mealActivityStartedAt, setMealActivity, subscribeMealActivity, type MealActivityStage } from './mealActivity';
 import { acquireChatSessionLease, subscribeToChatAgent } from './chatAgentEvents';
 import { beginForegroundWork } from './foregroundWork';
 
@@ -33,16 +35,18 @@ export type ChatSessionSnapshot = {
   messages: AgentMessage[];
   streamingMessage?: AgentMessage;
   actions: ChatAction[];
-  providerActivities: ProviderToolActivity[];
+  providerActivities: ChatProviderActivity[];
   toolExecutions?: Record<string, ToolExecution>;
   busy: boolean;
   mealActivity?: MealActivityStage;
+  workStartedAt?: number;
   recovering?: boolean;
+  questions?: AgentQuestion[];
   error?: string;
 };
 
 export type ChatSession = {
-  send(text: string, attachments: ChatAttachment[]): Promise<void>;
+  send(text: string, attachments: ChatAttachment[], options?: ChatSendOptions): Promise<void>;
   retry(): Promise<void>;
   abort(): void;
   /** Detach this screen. An in-flight turn remains owned by the conversation. */
@@ -60,6 +64,7 @@ type OpenChatSessionInput = {
 type RetainedSession = {
   session: ChatSession;
   listeners: Set<OpenChatSessionInput['onChanged']>;
+  dataListeners: Set<OpenChatSessionInput['onDataChanged']>;
   snapshot?: ChatSessionSnapshot;
   undoneActionIds: Set<string>;
   running: boolean;
@@ -79,9 +84,11 @@ export async function openChatSession(input: OpenChatSessionInput): Promise<Chat
   const entry = await pending;
   let attached = true;
   entry.listeners.add(input.onChanged);
+  entry.dataListeners.add(input.onDataChanged);
   entry.publish();
   const run = async (action: () => Promise<void>) => {
-    if (!attached || entry.running || entry.snapshot?.mealActivity) return;
+    if (!attached) throw new Error('Conversation is closed.');
+    if (entry.running || entry.snapshot?.mealActivity) throw new Error('This meal already has a request in progress.');
     entry.running = true;
     entry.publish();
     let release: (() => Promise<void>) | undefined;
@@ -96,12 +103,13 @@ export async function openChatSession(input: OpenChatSessionInput): Promise<Chat
     }
   };
   return {
-    send: (text, attachments) => run(() => entry.session.send(text, attachments)),
+    send: (text, attachments, options) => run(() => entry.session.send(text, attachments, options)),
     retry: () => run(() => entry.session.retry()),
     abort: () => { if (attached) entry.session.abort(); },
     close: async () => {
       attached = false;
       entry.listeners.delete(input.onChanged);
+      entry.dataListeners.delete(input.onDataChanged);
       await entry.disposeIfIdle();
     },
   };
@@ -111,7 +119,7 @@ async function createRetainedSession(input: OpenChatSessionInput): Promise<Retai
   let disposed = false;
   const entry: RetainedSession = {
     session: undefined as unknown as ChatSession,
-    listeners: new Set(), running: false, undoneActionIds: new Set(),
+    listeners: new Set(), dataListeners: new Set(), running: false, undoneActionIds: new Set(),
     publish() {
       if (entry.snapshot) for (const listener of entry.listeners) {
         // Undo is durable and cannot be reversed by an older in-flight action reload.
@@ -128,7 +136,19 @@ async function createRetainedSession(input: OpenChatSessionInput): Promise<Retai
     },
   };
   try {
-    entry.session = await openOwnedChatSession({ ...input, onChanged: snapshot => {
+    entry.session = await openOwnedChatSession({ ...input,
+      // A foreground screen may attach after capture created the owner. Notify
+      // current observers, including on later turns after that caller detaches.
+      onDataChanged: async () => {
+        // These callbacks refresh screens after authoritative work has finished.
+        // A failed observer cannot undo that work or cause the agent to repeat it.
+        const results = await Promise.allSettled([...entry.dataListeners].map(listener => Promise.resolve().then(listener)));
+        if (results.some(result => result.status === 'rejected')) await appendDiagnosticEvent({
+          id: `${Date.now()}-screen-refresh`, createdAt: Date.now(), operation: 'observer_error',
+          threadId: input.thread.id, stage: 'screen_refresh',
+        }).catch(() => undefined);
+      },
+      onChanged: snapshot => {
       entry.snapshot = snapshot;
       entry.publish();
     } });
@@ -161,16 +181,28 @@ async function createOpenChatSession(input: OpenChatSessionInput, releaseLease: 
   let agent: Agent;
   let closed = false;
   let mealActivity: MealActivityStage | undefined;
-  let reloadTask: Promise<void> = Promise.resolve();
   const toolExecutions: Record<string, ToolExecution> = {};
-  const providerActivities = new Map<string, ProviderToolActivity>();
+  const providerActivities = new Map(readProviderActivities(messages).map(activity => [activity.id, activity]));
+  const syncActivity = () => {
+    // The turn owns the busy lifetime; actual execution events own its label.
+    // Never start another lifetime from a late provider observer.
+    if (!mealActivity) return;
+    const tool = Object.values(toolExecutions).findLast(tool => tool.status === 'running');
+    const stages: Record<string, MealActivityStage> = { view_meal_photos: 'reading_photos', get_meal: 'reviewing_meal',
+      edit_meal: 'saving_result', create_meal: 'saving_result', delete_meal: 'saving_result' };
+    const stage = tool ? stages[tool.name ?? ''] ?? 'thinking'
+      : [...providerActivities.values()].some(activity => activity.status === 'active') ? 'web_search' : 'thinking';
+    if (stage !== mealActivity) setMealActivity(input.selectedMealId ?? input.thread.mealId!, stage);
+  };
   let persistTask: Promise<void> = Promise.resolve();
   let hasSent = false;
   let recovering = false;
-  let answering = false;
-  let answerWasRouted = false;
-  let answerError: string | undefined;
   let recoveryAbort = new AbortController();
+  let questions = await readAgentQuestions({threadId:input.thread.id,mealId:input.selectedMealId??input.thread.mealId});
+  const interrupted = await pendingAgentTurn({threadId:input.thread.id});
+  let turnError = interrupted ? interrupted.error ?? (locale === 'ru'
+    ? 'Предыдущий запрос был прерван. Повторите его, чтобы продолжить.'
+    : 'The previous request was interrupted. Retry it to continue.') : undefined;
 
   const emit = () => input.onChanged({
     messages: agent.state.messages,
@@ -182,17 +214,23 @@ async function createOpenChatSession(input: OpenChatSessionInput, releaseLease: 
     actions,
     toolExecutions: { ...toolExecutions },
     providerActivities: [...providerActivities.values()],
-    busy: agent.state.isStreaming || recovering || answering,
+    busy: agent.state.isStreaming || recovering,
     mealActivity,
+    workStartedAt: mealActivity ? mealActivityStartedAt(input.selectedMealId ?? input.thread.mealId ?? '')
+      : agent.state.isStreaming || recovering ? turnStartedAt : undefined,
     recovering,
-    error: answerWasRouted ? answerError : agent.state.errorMessage ?? (() => {
+    questions,
+    error: turnError ?? agent.state.errorMessage ?? (() => {
       const last = agent.state.messages.at(-1);
-      if (last?.role === 'toolResult' && last.isError && last.toolName === 'answer_meal_question') {
-        return last.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n');
-      }
       return last?.role === 'assistant' && last.stopReason === 'error' ? last.errorMessage : undefined;
     })(),
   });
+
+  const refreshQuestions = async () => {
+    questions = await readAgentQuestions({threadId:input.thread.id,mealId:input.selectedMealId??input.thread.mealId});
+    if (!closed) emit();
+  };
+  const unsubscribeQuestions = subscribeAgentQuestions(()=>{void refreshQuestions().catch(()=>undefined);});
 
   agent = await createChatAgent({
     systemPrompt: buildChatPrompt({
@@ -204,24 +242,27 @@ async function createOpenChatSession(input: OpenChatSessionInput, releaseLease: 
     }),
     messages,
     sessionId: input.thread.id,
+    onResearch:research=>recordAgentResearch(input.thread.id,research),
     onProviderActivity: (activity) => {
-      if (closed) return;
-      providerActivities.set(activity.id, activity);
+      if (closed || recoveryAbort.signal.aborted || !agent.state.isStreaming) return;
+      const previous = providerActivities.get(activity.id);
+      providerActivities.set(activity.id, { ...activity,
+        messageIndex: previous?.messageIndex ?? agent.state.messages.length,
+        blockIndex: previous?.blockIndex ?? (agent.state.streamingMessage?.role === 'assistant'
+          ? agent.state.streamingMessage.content.filter(block => block.type !== 'thinking').length : 0),
+      });
+      syncActivity();
       emit();
     },
     tools: createCalDoneTools({
       threadId: input.thread.id,
+      mealId:input.selectedMealId??input.thread.mealId,
+      getResearch:async()=>(await pendingAgentTurn({threadId:input.thread.id}))?.research??{status:'not_searched',sources:[]},
       attachments: attachmentMap,
       getMessages: () => agent.state.messages,
       onDataChanged: async () => {
-        // Analysis may append remaining questions while the agent is running.
-        // Merge only those durable messages; never replace its active tool loop.
-        const stored = await loadChatMessages(input.thread.id);
-        const existing = new Set(agent.state.messages.filter(message => message.role === 'mealQuestion').map(message => JSON.stringify(message)));
-        for (const message of stored) {
-          if (message.role === 'mealQuestion' && !existing.has(JSON.stringify(message))) agent.state.messages.push(message);
-        }
         await input.onDataChanged();
+        await refreshQuestions();
         emit();
       },
     }),
@@ -235,11 +276,15 @@ async function createOpenChatSession(input: OpenChatSessionInput, releaseLease: 
 
   const unsubscribe = subscribeToChatAgent(agent, (event) => {
     if (event.type === 'tool_execution_start') {
-      toolExecutions[event.toolCallId] = { status: 'running', arguments: event.args };
+      toolExecutions[event.toolCallId] = { status: 'running', arguments: event.args, name: event.toolName };
+      syncActivity();
+      void recordToolDiagnostic({threadId: input.thread.id, toolCallId: event.toolCallId, toolName: event.toolName, phase: 'started', value: event.args}, appendDiagnosticEvent);
     }
     if (event.type === 'tool_execution_end') {
+      void recordToolDiagnostic({threadId: input.thread.id, toolCallId: event.toolCallId, toolName: event.toolName, phase: 'completed', isError: event.isError, value: event.result}, appendDiagnosticEvent);
       const execution = toolExecutions[event.toolCallId];
       if (execution) toolExecutions[event.toolCallId] = { ...execution, status: recoveryAbort.signal.aborted ? 'cancelled' : event.isError ? 'failed' : 'completed' };
+      syncActivity();
       void listChatActions(input.thread.id).then((next) => {
         actions = next;
         emit();
@@ -250,123 +295,35 @@ async function createOpenChatSession(input: OpenChatSessionInput, releaseLease: 
       if (confirmation && event.message.stopReason === 'stop') event.message.content = [{type:'text',text:confirmation}];
       void recordChatDiagnostic(input.thread.id, turnStartedAt, event.message);
     }
-    if (event.type === 'message_end' || event.type === 'agent_end') {
-      agent.state.messages = agent.state.messages.map(sanitizeChatMessage);
-      void persist().catch(() => undefined);
-    }
     if (event.type === 'agent_end') {
       for (const [id, execution] of Object.entries(toolExecutions)) {
         if (execution.status === 'running') toolExecutions[id] = { ...execution, status: 'cancelled' };
       }
       for (const [id, activity] of providerActivities) {
         if (activity.status === 'active') {
-          providerActivities.set(id, { ...activity, status: agent.state.errorMessage ? 'error' : 'complete' });
+          providerActivities.set(id, { ...activity, status: recoveryAbort.signal.aborted ? 'cancelled' : agent.state.errorMessage ? 'error' : 'complete' });
         }
       }
+      syncActivity();
+    }
+    if (event.type === 'message_end' || event.type === 'agent_end') {
+      agent.state.messages = retainProviderActivities(agent.state.messages.map(sanitizeChatMessage), [...providerActivities.values()]);
     }
     emit();
   });
-  // Inline answers run in the meal processor, outside this chat agent. Observe
-  // their lifecycle so opening chat mid-request shows progress and fresh results.
+  // One activity owner covers capture, form replies and chat. A secondary
+  // historical conversation observes the same meal without replacing history.
   const unsubscribeMeal = subscribeMealActivity((activities) => {
-    const previous = mealActivity;
     mealActivity = activities.get(input.selectedMealId ?? input.thread.mealId ?? '');
-    if (previous && !mealActivity && !agent.state.isStreaming && !answering) {
-      reloadTask = reloadTask.then(async () => {
-        if (closed) return;
-        const [messages, nextActions] = await Promise.all([
-          loadChatMessages(input.thread.id), listChatActions(input.thread.id),
-        ]);
-        if (closed) return;
-        agent.state.messages = messages;
-        actions = nextActions;
-        await input.onDataChanged();
-        emit();
-      }).catch(() => undefined);
-    }
     emit();
   });
   emit();
 
-  const retryFailedResponse = async (wait: boolean) => {
-    const messages = continuationMessages(agent.state.messages);
-    if (!messages || closed) return;
-    recovering = true;
-    emit();
-    try {
-      if (wait) await waitForConnectionRecovery(recoveryAbort.signal);
-      if (closed || recoveryAbort.signal.aborted) return;
-      agent.state.messages = messages;
-      hasSent = true;
-      turnStartedAt = Date.now();
-      await agent.continue();
-    } finally { recovering = false; emit(); }
-  };
-
-  // Composer text and button answers have the same meaning while a meal has
-  // an open clarification. Execute the registered tool directly so routing is
-  // deterministic and still retains its revision checks, receipt and Undo.
-  const pendingMealId = () => input.selectedMealId ?? input.thread.mealId ??
-    agent.state.messages.findLast(message => message.role === 'mealQuestion')?.mealId;
-  const applicationMessage = (content: AssistantMessage['content'], stopReason: AssistantMessage['stopReason']): AssistantMessage => ({
-    role: 'assistant', content, stopReason, timestamp: Date.now(),
-    api: agent.state.model.api, provider: agent.state.model.provider, model: agent.state.model.id,
-    // Application routing/receipts are not inference and incur no model usage.
-    usage: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0}},
-  });
-  const answerPendingQuestion = async (mealId: string | undefined, message?: ChatUserMessage): Promise<boolean> => {
-    if (!mealId) return false;
-    answering = true;
-    let callId: string | undefined;
-    try {
-      const meal = await getMeal(mealId);
-      if (!mealQuestions(meal?.analysis?.clarification).length) return false;
-      const tool = agent.state.tools.find(tool => tool.name === 'answer_meal_question');
-      if (!tool) throw new Error('Meal answer tool is unavailable');
-      answerWasRouted = true;
-      answerError = undefined;
-      if (message) agent.state.messages.push(message);
-      callId = `answer-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      const args = {mealId, expectedRevision: meal!.revision};
-      agent.state.messages.push(applicationMessage([{type: 'toolCall', id: callId, name: tool.name, arguments: args}], 'toolUse'));
-      toolExecutions[callId] = {status: 'running', arguments: args};
-      emit();
-      await persist();
-      const result = await tool.execute(callId, args, recoveryAbort.signal);
-      agent.state.messages.push({role: 'toolResult', toolCallId: callId, toolName: tool.name, ...result, isError: false, timestamp: Date.now()});
-      toolExecutions[callId] = {...toolExecutions[callId], status: 'completed'};
-      const next = await getMeal(mealId);
-      const confirmation = confirmationForTurn(agent.state.messages);
-      if (confirmation && !mealQuestions(next?.analysis?.clarification).length) {
-        agent.state.messages.push(applicationMessage([{type: 'text', text: confirmation}], 'stop'));
-      }
-      return true;
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      answerError = text;
-      if (callId) {
-        toolExecutions[callId] = {...toolExecutions[callId], status: recoveryAbort.signal.aborted ? 'cancelled' : 'failed'};
-        agent.state.messages.push({role: 'toolResult', toolCallId: callId, toolName: 'answer_meal_question', isError: true, content: [{type: 'text', text}], timestamp: Date.now()});
-      }
-      throw error;
-    } finally {
-      try {
-        if (callId) {
-          await persist();
-          actions = await listChatActions(input.thread.id);
-          await input.onDataChanged();
-        }
-      } finally { answering = false; emit(); }
-    }
-  };
-
   const session: ChatSession = {
-    send: async (text, attachments) => {
-      if (mealActivity || recovering || answering || agent.state.isStreaming) return;
-      await reloadTask;
+    send: async (text, attachments, options) => {
+      if (mealActivity || recovering || agent.state.isStreaming) return;
       const cleanText = text.trim();
       if (!cleanText && attachments.length === 0) return;
-      providerActivities.clear();
       emit();
       attachments.forEach((attachment) => attachmentMap.set(attachment.id, attachment));
       if (!threadTitle) {
@@ -379,40 +336,48 @@ async function createOpenChatSession(input: OpenChatSessionInput, releaseLease: 
         text: cleanText || (locale === 'ru' ? 'Посмотри на прикреплённое фото.' : 'Look at the attached photo.'),
         attachments,
         timestamp: Date.now(),
+        id: options?.requestId ?? `message:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`,
+        questionAnswers: options?.questionAnswers,
+        source: options?.source ?? 'chat',
       };
       turnStartedAt = Date.now();
       hasSent = true;
+      turnError = undefined;
       recoveryAbort = new AbortController();
       try {
         const mealId = input.selectedMealId ?? input.thread.mealId;
         const run = async () => {
           try {
-            if (await answerPendingQuestion(pendingMealId(), message)) return;
-            answerWasRouted = false;
-            await agent.prompt(message);
-            if (isConnectionError(agent.state.errorMessage)) await retryFailedResponse(true);
+            await runAgentTurn({agent,threadId:input.thread.id,mealId,message,signal:recoveryAbort.signal});
           } finally { await input.onDataChanged(); }
         };
         if (mealId) await submitMealAnswer(mealId, run);
         else await run();
+      } catch (error) {
+        turnError = error instanceof Error ? error.message : String(error);
+        throw error;
       } finally {
         emit();
       }
     },
     retry: async () => {
-      if (mealActivity || recovering || answering || agent.state.isStreaming) return;
+      if (mealActivity || recovering || agent.state.isStreaming) return;
       recoveryAbort = new AbortController();
-      const last = agent.state.messages.at(-1);
-      if (last?.role === 'toolResult' && last.isError && last.toolName === 'answer_meal_question') {
-        await answerPendingQuestion(pendingMealId());
-      } else await retryFailedResponse(false);
+      recovering = true;
+      turnError = undefined;
+      hasSent = true;
+      turnStartedAt = Date.now();
+      emit();
+      try {await runAgentTurn({agent,threadId:input.thread.id,mealId:input.selectedMealId??input.thread.mealId,signal:recoveryAbort.signal});}
+      catch(error){turnError=error instanceof Error?error.message:String(error);throw error;}
+      finally {recovering=false;await input.onDataChanged();emit();}
     },
     abort: () => { recoveryAbort.abort(); agent.abort(); },
     close: async () => {
       if (closed) return;
-      await reloadTask;
       closed = true;
       unsubscribeMeal();
+      unsubscribeQuestions();
       recoveryAbort.abort();
       agent.abort();
       await agent.waitForIdle().catch(() => undefined);

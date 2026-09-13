@@ -45,7 +45,9 @@ test('meal choices and assistant question results survive database round trips a
     const questions = [{ question: 'How much?', options: ['100 g', '200 g'] }];
     const analysis = { title: 'Rice', mealType: 'lunch', items: [], totals: { calories: 0, protein: 0, carbs: 0, fat: 0 }, clarification: { questions: ['How much?'], choices: questions, impactCalories: 150 } };
     await meals.saveMealRecord({ id: 'meal-choices', revision: 1, capturedAt: 1, status: 'needs_input', note: '', photos: [], analysis });
-    assert.deepEqual(JSON.parse(JSON.stringify((await meals.getMeal('meal-choices')).analysis.clarification)), analysis.clarification);
+    const saved = await meals.getMeal('meal-choices');
+    assert.deepEqual(JSON.parse(JSON.stringify(saved.analysis.clarification.choices.map(({question, options}: any) => ({question, options})))), questions);
+    assert.equal(saved.questions[0].id, 'legacy:meal-choices:0');
     await meals.saveMealRecord({ id: 'legacy', revision: 1, capturedAt: 1, status: 'needs_input', note: '', photos: [], analysis: { ...analysis, clarification: { question: 'Which sauce?', impactCalories: 120 } } });
     assert.equal((await meals.getMeal('legacy')).analysis.clarification.questions[0], 'Which sauce?');
     const thread = await chat.createChatThread();

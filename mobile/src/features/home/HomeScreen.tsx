@@ -1,7 +1,8 @@
-import { MealWebImage } from '../../components/MealWebImage';
-import { mealActivityLabel } from '../../components/MealProgress';
+import {mealQuestionChoicesFor} from '../../domain/mealQuestions';
 import { Ionicons } from '@expo/vector-icons';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { MealWebImage } from '../../components/MealWebImage';
+import { mealActivityLabel } from '../../components/MealWorkStatus';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { IconButton, PrimaryButton } from '../../components/controls';
 import { ScreenReveal } from '../../components/ScreenReveal';
@@ -12,8 +13,8 @@ import { formatDay, formatNumber, formatTime, locale, t } from '../../i18n';
 import type { MealActivityStage } from '../../services/mealActivity';
 
 export function HomeScreen(props: {
-  answeringMealIds?: ReadonlySet<string>;
   failedDishAdditionIds?: ReadonlySet<string>;
+  answeringMealIds?: ReadonlySet<string>;
   meals: Meal[];
   activities: ReadonlyMap<string, MealActivityStage>;
   goals: DailyGoals;
@@ -33,8 +34,10 @@ export function HomeScreen(props: {
 }) {
   const totals = totalsFor(props.meals);
   const meals = [...props.meals].sort((a, b) => b.capturedAt - a.capturedAt);
-  const isWorking = (meal: Meal) => props.answeringMealIds?.has(meal.id) || props.activities.has(meal.id) || meal.status === 'queued' || meal.status === 'analyzing';
-  const attention = meals.filter((m) => !isWorking(m) && (m.status === 'needs_input' || m.status === 'failed'));
+  const isWorking = (meal: Meal) => props.activities.has(meal.id) || Boolean(props.answeringMealIds?.has(meal.id))
+    || meal.status === 'queued' || meal.status === 'analyzing';
+  const attention = meals.filter(meal => !isWorking(meal) && (meal.status === 'needs_input' || meal.status === 'failed'));
+  const rest = meals.filter(meal => !attention.includes(meal));
   const progress = props.goals.calories ? Math.min(1, totals.calories / props.goals.calories) : 0;
   const unit = props.units.energy === 'kj' ? t('kilojoules') : t('kcal');
   const ru = locale === 'ru';
@@ -152,7 +155,7 @@ export function HomeScreen(props: {
                               : 'A question about your meal'}
                         </Text>
                         <Text numberOfLines={2} style={styles.attentionText}>
-                          {mealQuestions(meal.analysis?.clarification)[0] ??
+                          {mealQuestionChoicesFor(meal)[0]?.question ??
                             meal.analysis?.title ??
                             t('meal')}
                         </Text>
@@ -192,8 +195,14 @@ export function HomeScreen(props: {
                     : 'Add a meal your way. You can refine the details later.'}
                 </Text>
               </View>
+            ) : rest.length === 0 ? (
+              <Text selectable style={styles.emptyBody}>
+                {ru
+                  ? 'Записи, которым нужно внимание, показаны выше.'
+                  : 'Meals that need attention are shown above.'}
+              </Text>
             ) : (
-              meals.map((meal) => {
+              rest.map((meal) => {
                 const working = isWorking(meal);
                 return (
                   <Pressable
@@ -216,16 +225,14 @@ export function HomeScreen(props: {
                       <Text numberOfLines={2} style={styles.mealTitle}>
                         {meal.analysis?.title ?? t('meal')}
                       </Text>
+                      {props.failedDishAdditionIds?.has(meal.id) && <Text style={styles.working}>{t('dishNotAdded')}</Text>}
                       <View style={styles.mealMeta}>
                         <Text style={styles.time}>{meal.analysis?.mealType ? `${t(meal.analysis.mealType)} · ` : ''}{formatTime(meal.capturedAt)}</Text>
-                        <Text style={[styles.calories, working && styles.working]}>
-                          {working
-                            ? mealActivityLabel(props.activities.get(meal.id))
-                            : meal.analysis ? `${formatNumber(displayEnergy(meal.analysis.totals.calories, props.units))} ${unit}` : '—'}
-                        </Text>
+                        {working ? <View style={{flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1}}>
+                          <ActivityIndicator size="small" color={color.action} />
+                          <Text accessibilityLiveRegion="polite" style={[styles.calories, styles.working]}>{mealActivityLabel(props.activities.get(meal.id))}</Text>
+                        </View> : <Text style={styles.calories}>{`${formatNumber(displayEnergy(meal.analysis?.totals.calories ?? 0, props.units))} ${unit}`}</Text>}
                       </View>
-                      {props.failedDishAdditionIds?.has(meal.id) && <Text style={styles.working}>{t('dishNotAdded')}</Text>}
-                      {!working && (meal.status === 'needs_input' || meal.status === 'failed') && <Text style={styles.working}>{meal.status === 'failed' ? t('failed') : ru ? 'Предварительно · нужно уточнение' : 'Provisional · needs clarification'}</Text>}
                       {!working && meal.analysis && <Text style={styles.mealMacros}>
                         {(['protein', 'carbs', 'fat'] as const).map((key) => `${ru ? ({ protein: 'Б', carbs: 'У', fat: 'Ж' }[key]) : ({ protein: 'P', carbs: 'C', fat: 'F' }[key])} ${formatNumber(displayWeight(meal.analysis!.totals[key], props.units))} ${props.units.weight === 'oz' ? t('ounces') : t('grams')}`).join(' · ')}
                       </Text>}

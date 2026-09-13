@@ -44,10 +44,13 @@ export type Meal = {
   revision: number;
   capturedAt: number;
   status: MealStatus;
+  /** Original user-authored input. Agent explanations must not overwrite it. */
   note: string;
   photos: MealPhoto[];
   analysis?: MealAnalysis;
   error?: string;
+  /** Loaded from the shared question store; screens never infer answers from message order. */
+  questions?: import('./agentQuestion').AgentQuestion[];
 };
 
 export type DailyGoals = {

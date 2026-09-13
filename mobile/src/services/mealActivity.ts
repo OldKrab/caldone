@@ -34,3 +34,8 @@ export function subscribeMealActivity(listener: Listener): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
+
+/** Shared turn start time used by the persistent agent. */
+export function mealActivityStartedAt(mealId: string): number | undefined {
+  return getMealActivityDetails(mealId)?.startedAt;
+}

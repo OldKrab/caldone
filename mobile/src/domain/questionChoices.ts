@@ -1,5 +1,5 @@
 /** Suggested answers are model proposals, never user evidence until submitted. */
-export type QuestionChoices = { question: string; options: string[] };
+export type QuestionChoices = { id?: string; question: string; options: string[] };
 
 /** Validate untrusted model output and old saved tool results before rendering controls. */
 export function normalizeQuestionChoices(value: unknown): QuestionChoices[] {
@@ -21,8 +21,12 @@ export function normalizeQuestionChoices(value: unknown): QuestionChoices[] {
 
 /** Include the question so repeated answers such as “Yes” retain their meaning. */
 export function formatQuestionAnswers(questions: QuestionChoices[], answers: Record<string, string>): string {
-  return questions.flatMap(({ question }) => {
-    const answer = typeof answers[question] === 'string' ? answers[question].trim() : '';
+  return questions.flatMap(({ id, question }) => {
+    const answer = typeof answers[id??question] === 'string' ? answers[id??question].trim() : '';
     return answer ? [`${question}\n${answer}`] : [];
   }).join('\n\n');
+}
+
+export function questionAnswerReferences(questions:QuestionChoices[],answers:Record<string,string>):import('./chat').QuestionAnswer[]{
+  return questions.flatMap(({id})=>id && answers[id]?.trim()?[{questionId:id,answer:answers[id].trim()}]:[]);
 }

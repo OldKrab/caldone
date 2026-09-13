@@ -13,12 +13,18 @@ const result = { title: 'Salad', mealType: 'lunch', items: [
 (globalThis as any).__dishModel = async () => {
   await new Promise<void>(resolve => { finish = resolve; });
   if (fail) throw new Error('offline');
-  return { text: JSON.stringify(result) };
+  const meal = (globalThis as any).__mealDateFlow.meals[0];
+  meal.analysis.items.push(result.items[0]);
 };
 const fixture = appFlow({
   realModules: ['./src/services/mealAddition', './src/services/backgroundDishAddition', './src/services/mealActivity'],
   adapters: {
-    '../ai/piClient': 'export const analyzeMeal = input => globalThis.__dishModel(input);',
+    './mealConversation': `export const sendMealMessage=async id=>{
+      const {setMealActivity}=await import('${new URL('../services/mealActivity.ts', import.meta.url).href}');
+      setMealActivity(id,'thinking');try{await globalThis.__dishModel();}finally{setMealActivity(id);}
+    };export const resumeMealConversation=sendMealMessage;`,
+    '../data/agentTurnRepository': 'export const pendingAgentTurn=async()=>undefined;',
+    '../data/chatRepository': 'export const retainedInputPhotoUris=async()=>new Set();',
     './foregroundWork': 'export const beginForegroundWork = async () => async () => {};',
     'expo-file-system': `export class File {
       uri = 'file:///saved-photo.jpg'; exists = true;

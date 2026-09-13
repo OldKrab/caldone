@@ -43,3 +43,9 @@ export function mealQuestionChoices(clarification?: MealClarification | LegacyMe
     options: choices.find(choice => choice.question === question)?.options ?? [],
   }));
 }
+
+/** Meal cards and chat consume the same open question identities. Legacy
+ * clarification is only a fallback while reading an older imported record. */
+export function mealQuestionChoicesFor(meal:import('./meal').Meal):QuestionChoices[]{
+  return meal.questions!==undefined?meal.questions.filter(question=>question.state==='open'):mealQuestionChoices(meal.analysis?.clarification);
+}

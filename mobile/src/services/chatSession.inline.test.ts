@@ -1,168 +1,105 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { registerHooks } from 'node:module';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { setMealActivity } from './mealActivity.ts';
+import { test } from 'node:test';
+import { fixture, meals, chat, sessions, conversation, savedMeal, rice, toolOutput, textOutput } from '../testing/mealAgentTestContext.ts';
 
-// Substitute native storage and provider boundaries, retaining the real session lifecycle.
-const fixture = { messages: [{ role: 'chatUser', text: 'Everything shown', attachments: [], timestamp: 1 }] as any[], saved: [] as any[], prompts: 0, failPrompt: false, continued: [] as any[], actions: [] as any[], meal: undefined as any };
-(globalThis as any).__inlineFixture = fixture;
-const sources: Record<string, string> = {
-  './foregroundRecovery': 'export const waitForConnectionRecovery=async()=>{};',
-  './foregroundWork': 'export const beginForegroundWork=async()=>async()=>{};',
-  'react-native': 'export const AppState={currentState:"active"};',
-  'expo-file-system': 'export class File {}',
-  '../ai/piClient': `export async function createChatAgent({messages}) {
-    return {state:{messages,isStreaming:false}, replaceMessages(messages){this.state.messages=messages},
-      subscribe(listener){globalThis.__inlineFixture.listener=listener;return ()=>{}}, abort(){globalThis.__inlineFixture.aborts=(globalThis.__inlineFixture.aborts||0)+1}, async waitForIdle(){}, async prompt(message){
-        const f=globalThis.__inlineFixture; f.prompts++;
-        if(f.hold){this.state.messages.push(message);await f.hold;this.state.messages.push({role:'assistant',content:[{type:'text',text:'Updated to 350 g'}],stopReason:'stop'});return;}
-        if(f.failPrompt){
-          this.state.messages.push(message,{role:'toolResult',toolCallId:'already-saved',content:[]},
-            {role:'assistant',stopReason:'error',errorMessage:'Software caused connection abort'});
-          this.state.errorMessage='Software caused connection abort';
-        }
-      }, async continue(){globalThis.__inlineFixture.continued=[...this.state.messages]; this.state.errorMessage=undefined;}};
-  } export const getThinkingLevel=async()=>null; export const getWebSearchEnabled=async()=>false;`,
-  '../ai/chatTools': 'export const createCalDoneTools=()=>[];',
-  '../ai/chatPrompt': 'export const buildChatPrompt=()=>""; export const CHAT_PROMPT_VERSION="test";',
-  '../data/chatRepository': `export const loadChatMessages=async()=>[...globalThis.__inlineFixture.messages];
-    export const listChatActions=async()=>structuredClone(globalThis.__inlineFixture.actions); export const sanitizeChatMessage=x=>x;
-    export const saveChatMessages=async(_id,messages)=>{globalThis.__inlineFixture.saved=messages};
-    export const getChatAction=async(id)=>structuredClone(globalThis.__inlineFixture.actions.find(a=>a.id===id)); export const markChatActionUndone=async(id)=>{globalThis.__inlineFixture.actions.find(a=>a.id===id).undone=true};
-    export const renameChatThread=async()=>{};`,
-  '../data/mealRepository': ['appendDiagnosticEvent','deleteMeal','getDailyGoals','getGoalProfile','getPreference','removePreference','saveDailyGoals','saveGoalProfile'].map(n=>`export const ${n}=async()=>null;`).join('\n') + `export const getMeal=async()=>structuredClone(globalThis.__inlineFixture.meal); export const replaceMeal=async(meal)=>{globalThis.__inlineFixture.meal=structuredClone(meal)};`,
-  '../i18n': 'export const locale="en";',
-};
-const hooks = registerHooks({ resolve(specifier, context, next) {
-  if (sources[specifier]) return {url:'data:text/javascript,'+encodeURIComponent(sources[specifier]),shortCircuit:true};
-  if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) {
-    const url=new URL(specifier+'.ts',context.parentURL);
-    if (existsSync(fileURLToPath(url))) return next(url.href,context);
-  }
-  return next(specifier,context);
-}});
-const { openChatSession, undoAssistantAction } = await import('./chatSession.ts');
-
-test('opening chat during an inline answer shows meal work and reloads subsequent questions', async () => {
-  setMealActivity('meal-inline', 'reviewing_meal');
-  const snapshots: any[]=[];
-  const session=await openChatSession({
-    thread:{id:'thread-inline',mealId:'meal-inline',title:'Meal',purpose:'clarification',createdAt:1,updatedAt:1},
-    selectedMealId:'meal-inline', onChanged:s=>snapshots.push(s), onDataChanged:async()=>{},
-  });
-  try {
-    assert.equal(snapshots.at(-1).mealActivity, 'reviewing_meal');
-    await session.send('Another answer', []);
-    assert.equal(fixture.prompts, 0, 'do not start a competing chat turn during inline analysis');
-    fixture.messages.push({role:'mealQuestion',questions:['How much sauce?'],timestamp:2});
-    setMealActivity('meal-inline');
-    await new Promise(resolve=>setImmediate(resolve));
-    assert.equal(snapshots.at(-1).mealActivity, undefined);
-    assert.equal(snapshots.at(-1).messages.at(-1).questions[0], 'How much sauce?');
-  } finally {
-    await session.close();
-    setMealActivity('meal-inline');
-    hooks.deregister();
-  }
-  assert.equal(fixture.saved.length, 0, 'an idle viewing session must not overwrite processor-owned messages');
-});
-
-test('chat automatically resumes a failed response without resending the user or completed tools', async () => {
-  fixture.messages=[];
-  fixture.prompts=0;
-  fixture.failPrompt=true;
-  const snapshots:any[]=[];
-  const session=await openChatSession({
-    thread:{id:'thread-recovery',title:'Meal',purpose:'meal',createdAt:1,updatedAt:1},
-    onChanged:s=>snapshots.push(s),onDataChanged:async()=>{},
-  });
-  try {
-    await session.send('Update meal',[]);
-    assert.equal(fixture.prompts,1);
-    assert.deepEqual(fixture.continued.map(m=>m.role),['chatUser','toolResult']);
-    assert.equal(fixture.continued.at(-1).toolCallId,'already-saved');
-    assert.equal(snapshots.at(-1).busy,false);
-    assert.equal(snapshots.at(-1).error,undefined);
-  } finally {await session.close();}
-});
-
-
-test('execution events distinguish running, completed, and cancelled actions', async () => {
-  fixture.messages=[];
-  const snapshots:any[]=[];
-  const session=await openChatSession({
-    thread:{id:'thread-activity',title:'Meal',purpose:'meal',createdAt:1,updatedAt:1},
-    onChanged:s=>snapshots.push(s),onDataChanged:async()=>{},
-  });
-  const event=(value:any)=>(fixture as any).listener(value);
-  try {
-    event({type:'tool_execution_start',toolCallId:'a',args:{statusText:'Read meal'}});
-    assert.equal(snapshots.at(-1).toolExecutions.a.status,'running');
-    event({type:'tool_execution_end',toolCallId:'a',isError:false});
-    assert.equal(snapshots.at(-1).toolExecutions.a.status,'completed');
-    event({type:'tool_execution_start',toolCallId:'b',args:{statusText:'Update meal'}});
-    session.abort();
-    event({type:'tool_execution_end',toolCallId:'b',isError:true});
-    assert.equal(snapshots.at(-1).toolExecutions.b.status,'cancelled');
-  } finally {await session.close();}
-});
-
-test('leaving and reopening chat retains the pending turn and its eventual answer', async () => {
-  fixture.messages=[]; fixture.failPrompt=false; fixture.prompts=0;
-  let finish!:()=>void;
-  (fixture as any).hold=new Promise<void>(resolve=>{finish=resolve});
-  const input={thread:{id:'thread-navigation',title:'Meal',purpose:'meal' as const,createdAt:1,updatedAt:1},onDataChanged:async()=>{}};
-  const original=await openChatSession({...input,onChanged:()=>{}});
-  const turn=original.send('Actually 350 g',[]);
-  await new Promise(resolve=>setImmediate(resolve));
-  const aborts=(fixture as any).aborts||0;
-  await original.close();
-  assert.equal((fixture as any).aborts||0,aborts,'leaving the screen must not cancel inference');
-  const snapshots:any[]=[];
-  const reopened=await openChatSession({...input,onChanged:s=>snapshots.push(s)});
-  assert.equal(snapshots.at(-1).busy,true);
-  finish(); await turn;
-  assert.equal(fixture.prompts,1);
-  assert.equal(snapshots.at(-1).messages.at(-1).content[0].text,'Updated to 350 g');
-  assert.equal(snapshots.at(-1).busy,false);
-  (fixture as any).hold=undefined;
+test('leaving and reopening chat retains the active turn, progress, and eventual answer', async () => {
+  const meal = await savedMeal('retained-session');
+  const thread = await chat.ensureMealThread(meal.id, 'Lunch');
+  let snapshot: any;
+  const input = { thread, selectedMealId: meal.id, onChanged: (value: any) => { snapshot = value; }, onDataChanged: async () => {} };
+  const session = await sessions.openChatSession(input);
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  fixture.respond = async () => { started.resolve(); await release.promise; return [textOutput('The answer survived navigation.')]; };
+  const sending = session.send('Explain this meal', []);
+  await started.promise;
+  await session.close();
+  const reopened = await sessions.openChatSession(input);
+  assert.equal(snapshot.busy, true);
+  assert.ok(snapshot.workStartedAt);
+  await assert.rejects(reopened.send('Duplicate', []), /progress/);
+  release.resolve(); await sending;
+  assert.equal(snapshot.busy, false);
+  assert.ok(snapshot.messages.some((m: any) => m.role === 'assistant' && JSON.stringify(m.content).includes('survived navigation')));
   await reopened.close();
+  assert.equal((await chat.loadChatMessages(thread.id)).filter(m => m.role === 'chatUser').length, 1);
 });
 
-test('completed analysis replies use the app receipt before display and diagnostics', async () => {
-  fixture.messages=[
-    {role:'chatUser',text:'Google it',attachments:[],timestamp:1},
-    {role:'toolResult',toolName:'answer_meal_question',toolCallId:'saved',isError:false,content:[],details:{value:{confirmation:'Recorded estimate. Web search was unavailable.'}}},
-  ];
-  const session=await openChatSession({thread:{id:'thread-confirmation',title:'Meal',createdAt:1,updatedAt:1},onChanged:()=>{},onDataChanged:async()=>{}});
-  try {
-    const message:any={role:'assistant',content:[{type:'text',text:'Exact nutrition was not found online.'}],stopReason:'stop',provider:'test',model:'test'};
-    (fixture as any).listener({type:'message_end',message});
-    assert.deepEqual(message.content,[{type:'text',text:'Recorded estimate. Web search was unavailable.'}]);
-  } finally { await session.close(); }
+test('a screen attaching to background meal work keeps receiving data refreshes on later turns', async () => {
+  const meal = await savedMeal('headless-to-screen');
+  const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  fixture.respond = async () => { started.resolve(); await release.promise; return [textOutput('Ready.')]; };
+  const background = conversation.sendMealMessage(meal.id, 'Explain the meal');
+  await started.promise;
+  const thread = (await chat.preferredMealThread(meal.id, false))!;
+  let refreshes = 0;
+  const session = await sessions.openChatSession({ thread, selectedMealId: meal.id, onChanged() {},
+    onDataChanged: async () => { refreshes++; },
+  });
+  release.resolve(); await background;
+  refreshes = 0;
+  fixture.respond = async payload => payload.input.at(-1)?.type === 'function_call_output'
+    ? [textOutput('Updated.')]
+    : [toolOutput('edit_meal', { mealId: meal.id, expectedRevision: meal.revision, items: [{ ...rice, calories: 140 }] }, 'attached-screen-edit')];
+  await session.send('Change to 140 kcal', []);
+  assert.ok(refreshes > 0, 'the surviving screen must not retain the headless caller’s empty refresh callback');
+  await session.close();
 });
 
+test('a connection retry retains input and completed tools without running the mutation twice', async () => {
+  const meal = await savedMeal('connection-retry');
+  let request = 0;
+  fixture.respond = async () => {
+    request++;
+    if (request === 1) return [toolOutput('edit_meal', { mealId: meal.id, expectedRevision: meal.revision, items: [{ ...rice, calories: 140 }] }, 'once-only')];
+    if (request === 2) throw new Error('Network request failed');
+    return [textOutput('Saved after reconnecting.')];
+  };
+  await conversation.sendMealMessage(meal.id, 'Set rice to 140 kcal');
+  const thread = (await chat.preferredMealThread(meal.id, false))!;
+  assert.equal((await meals.getMeal(meal.id))!.revision, 2);
+  assert.equal((await chat.listChatActions(thread.id)).length, 1);
+  assert.equal((await chat.loadChatMessages(thread.id)).filter(m => m.role === 'chatUser').length, 1);
+  assert.equal(request, 3);
+});
 
-test('undo restores the meal and stays undone through later messages and reopening chat', async () => {
-  fixture.messages=[];
-  const before={id:'oats',photos:[],analysis:{totals:{calories:190,protein:7,carbs:30,fat:4},items:[{name:'Rolled oats',quantity:'50 g'}]}};
-  fixture.meal={...before,analysis:{totals:{calories:97,protein:3.5,carbs:15,fat:2},items:[{name:'Rolled oats',quantity:'25 g'},{name:'Black coffee',quantity:'200 ml'}]}};
-  fixture.actions=[{id:'undo-oats',threadId:'thread-undo',label:'Updated breakfast',createdAt:1,undone:false,undo:{kind:'restore_meal',meal:before,expectedMeal:structuredClone(fixture.meal)}}];
-  const snapshots:any[]=[];
-  const input={thread:{id:'thread-undo',title:'Meal',createdAt:1,updatedAt:1},onChanged:(s:any)=>snapshots.push(s),onDataChanged:async()=>{}};
-  const session=await openChatSession(input);
-  try {
-    await undoAssistantAction('undo-oats');
-    assert.deepEqual(fixture.meal,before);
-    assert.equal(snapshots.at(-1).actions[0].undone,true,'the subscribed screen must immediately observe completed undo');
-    (fixture as any).listener({type:'message_start',message:{role:'assistant',content:[]}});
-    assert.equal(snapshots.at(-1).actions[0].undone,true,'later messages must not restore the Undo button');
-    await undoAssistantAction('undo-oats');
-    assert.deepEqual(fixture.meal,before,'repeating undo must leave restored nutrition intact');
-  } finally {await session.close();}
-  const reopened=await openChatSession(input);
-  try {assert.equal(snapshots.at(-1).actions[0].undone,true);}
-  finally {await reopened.close();fixture.actions=[];}
+test('tool execution events expose running and completed operations', async () => {
+  const meal = await savedMeal('execution-events');
+  const thread = await chat.ensureMealThread(meal.id, 'Lunch');
+  const snapshots: any[] = [];
+  const session = await sessions.openChatSession({ thread, selectedMealId: meal.id,
+    onChanged: value => snapshots.push(value), onDataChanged: async () => {},
+  });
+  fixture.respond = async payload => payload.input.at(-1)?.type === 'function_call_output'
+    ? [textOutput('Read the meal.')]
+    : [toolOutput('get_meal', { mealId: meal.id, statusText: 'Opening the meal' }, 'read-progress')];
+  await session.send('Read this meal', []);
+  await session.close();
+  const statuses = snapshots.flatMap(s => Object.values(s.toolExecutions ?? {}).map((e: any) => e.status));
+  assert.ok(statuses.includes('running'));
+  assert.ok(statuses.includes('completed'));
+});
+
+test('Undo restores nutrition and question state and remains undone after another message and reopening', async () => {
+  const meal = await savedMeal('session-undo');
+  fixture.respond = async payload => payload.input.at(-1)?.type === 'function_call_output'
+    ? [textOutput('Updated.')]
+    : [toolOutput('edit_meal', { mealId: meal.id, expectedRevision: meal.revision, items: [{ ...rice, calories: 140 }],
+      questions: [{ question: 'Any sauce?', options: ['Yes', 'No'] }],
+    }, 'undoable-edit')];
+  await conversation.sendMealMessage(meal.id, 'Update to 140 kcal');
+  const thread = (await chat.preferredMealThread(meal.id, false))!;
+  const action = (await chat.listChatActions(thread.id))[0];
+  await sessions.undoAssistantAction(action.id);
+  const restored = (await meals.getMeal(meal.id))!;
+  assert.equal(restored.analysis!.totals.calories, 130);
+  assert.equal(restored.questions?.length ?? 0, 0);
+  fixture.respond = async () => [textOutput('The previous estimate was restored.')];
+  await conversation.sendMealMessage(meal.id, 'What is the current estimate?');
+  let snapshot: any;
+  const session = await sessions.openChatSession({ thread, selectedMealId: meal.id,
+    onChanged: value => { snapshot = value; }, onDataChanged: async () => {},
+  });
+  assert.equal(snapshot.actions.find((a: any) => a.id === action.id).undone, true);
+  await session.close();
 });

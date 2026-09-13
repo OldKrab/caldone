@@ -35,3 +35,10 @@ test('only explicitly answered questions are submitted with their context', () =
   assert.equal(formatQuestionAnswers(questions, { 'How much?': ' About 175 g ', 'Cream?': 'Not sure' }), 'How much?\nAbout 175 g\n\nCream?\nNot sure');
   assert.equal(formatQuestionAnswers([{ question: '__proto__', options: [] }], {}), '');
 });
+
+test('form answers carry stable question IDs even when question wording is reused', async()=>{
+  const {questionAnswerReferences}=await import('./questionChoices.ts');
+  const questions=[{id:'old',question:'How much?',options:['1','2']},{id:'new',question:'How much?',options:['1','2']}];
+  assert.deepEqual(questionAnswerReferences(questions,{new:'2'}),[{questionId:'new',answer:'2'}]);
+  assert.equal(formatQuestionAnswers(questions,{new:'2'}),'How much?\n2');
+});
