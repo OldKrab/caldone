@@ -33,4 +33,3 @@ export function repositories() {
   }
   return { chat: load(resolve(import.meta.dirname, 'chatRepository.ts')), sqlite, load };
 }
-

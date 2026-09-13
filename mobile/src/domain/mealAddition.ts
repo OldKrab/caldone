@@ -6,4 +6,3 @@ export function canAddDish(meal: Meal): boolean {
   return Boolean(meal.analysis && !meal.analysis.clarification &&
     (meal.status === 'complete' || meal.status === 'estimated'));
 }
-
