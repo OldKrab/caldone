@@ -3,6 +3,29 @@ import { test } from 'node:test';
 import { resolve } from 'node:path';
 import { repositories } from './repositoryTestHarness.ts';
 
+test('existing meal databases gain optional AI comments without rewriting user notes', async () => {
+  const {sqlite, load} = repositories();
+  try {
+    // A pre-comment database is an installation input, not a mock of repository internals.
+    sqlite.exec(`CREATE TABLE meals (
+      id TEXT PRIMARY KEY, revision INTEGER NOT NULL, captured_at INTEGER NOT NULL,
+      status TEXT NOT NULL, note TEXT NOT NULL, photos_json TEXT NOT NULL, analysis_json TEXT, error TEXT
+    );
+    INSERT INTO meals VALUES ('legacy',7,1234,'needs_input','  Мои слова.  ','[]',NULL,NULL);`);
+    const meals = load(resolve(import.meta.dirname, 'mealRepository.ts'));
+    await meals.initializeMeals();
+    const before = await meals.getMeal('legacy');
+    assert.equal(before.note, '  Мои слова.  ');
+    assert.equal(before.revision, 7);
+    assert.equal(before.aiComment, undefined);
+    await meals.replaceMeal({...before, aiComment:'Food cannot be identified yet.'});
+    await meals.initializeMeals();
+    const reopened = await meals.getMeal('legacy');
+    assert.equal(reopened.aiComment, 'Food cannot be identified yet.');
+    assert.equal(reopened.note, '  Мои слова.  ');
+  } finally { sqlite.close(); }
+});
+
 test('applying a portion answer saves nutrition and only closes that question, including after restart and retry', async () => {
   const {chat, sqlite, load} = repositories();
   try {

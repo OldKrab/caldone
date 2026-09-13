@@ -46,6 +46,8 @@ export type Meal = {
   status: MealStatus;
   /** Original user-authored input. Agent explanations must not overwrite it. */
   note: string;
+  /** Assistant-authored explanation, separate from user input; also available before an estimate. */
+  aiComment?: string;
   photos: MealPhoto[];
   analysis?: MealAnalysis;
   error?: string;

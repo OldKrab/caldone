@@ -58,14 +58,15 @@ export async function mergeCalDoneBackup(backup: CalDoneBackup): Promise<BackupI
       for (const meal of restoredMeals) {
         const result = await database.runAsync(
           `INSERT OR IGNORE INTO meals (
-             id, revision, captured_at, status, note, photos_json, analysis_json, error,
+             id, revision, captured_at, status, note, ai_comment, photos_json, analysis_json, error,
              clarification_at, attempts, next_attempt_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
           meal.id,
           meal.revision,
           meal.capturedAt,
           meal.status,
           meal.note,
+          meal.aiComment ?? null,
           JSON.stringify(meal.photos),
           meal.analysis ? JSON.stringify(meal.analysis) : null,
           meal.error ?? null,

@@ -8,6 +8,7 @@ CalDone is an Android food diary for people who want useful calorie and macro tr
 - Analyze meals with the connected OpenAI Codex provider and clarify uncertain portions or ingredients.
 - Review a daily journal, nutrition totals, goals, and meal history.
 - Correct meal details directly or through the assistant; inspect changes and undo supported actions.
+- Read the assistant's assumptions and limitations under **AI comment** (**Комментарий ИИ**) alongside the original user note in the meal card, including when no nutrition estimate is available. The assistant can update or clear this separate comment without changing the note or nutrition. Updating the app does not add comments to existing meals.
 - Add another dish to an existing meal. See the [app documentation](../mobile/README.md) for processing and draft-lifetime limits.
 - Use English or Russian, configurable units and notifications, and an Android home-screen capture widget.
 - Export and import app data, optionally including photos. Credentials are excluded.

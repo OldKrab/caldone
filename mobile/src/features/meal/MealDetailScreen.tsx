@@ -172,6 +172,7 @@ export function MealDetailScreen(props: {
               disabled={answering || props.answerSubmitting || Boolean(props.activity)}
               onSubmit={submitClarification} />
           ) : <Text selectable style={styles.pendingHelp}>{pendingHelp}</Text>}
+          <MealNotes meal={props.meal} />
           {!questions.length && <PrimaryButton label={locale === 'ru' ? 'К дневнику' : 'Back to journal'} onPress={props.onBack} />}
           {error ? <Text selectable accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
         </ScrollView>
@@ -365,12 +366,7 @@ function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: Nutrit
 
       {props.meal.photos.length === 0 && props.analysis.webImage && <MealWebImage key={props.analysis.webImage.url} image={props.analysis.webImage} />}
 
-      {props.meal.note.trim() && (
-        <View style={styles.noteBlock}>
-          <Text selectable style={styles.noteLabel}>{t('yourNote')}</Text>
-          <Text selectable style={styles.noteText}>{props.meal.note.trim()}</Text>
-        </View>
-      )}
+      <MealNotes meal={props.meal} />
 
         <View style={styles.items}>
           {props.analysis.items.map((item, index) => {
@@ -413,6 +409,20 @@ function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: Nutrit
       </Modal>
     </>
   );
+}
+
+function MealNotes({meal}: {meal: Meal}) {
+  if (!meal.note.trim() && !meal.aiComment?.trim()) return null;
+  return <View style={styles.mealNotes}>
+    {meal.note.trim() ? <View style={styles.noteBlock}>
+      <Text selectable style={styles.noteLabel}>{t('yourNote')}</Text>
+      <Text selectable style={styles.noteText}>{meal.note.trim()}</Text>
+    </View> : null}
+    {meal.aiComment?.trim() ? <View style={styles.aiComment}>
+      <Text selectable accessibilityRole="header" style={styles.aiCommentLabel}>{t('aiComment')}</Text>
+      <Text selectable style={styles.aiCommentText}>{meal.aiComment.trim()}</Text>
+    </View> : null}
+  </View>;
 }
 
 function MealEditor(props: {
@@ -579,6 +589,10 @@ const styles = StyleSheet.create({
   mealPhoto: { backgroundColor: color.camera, borderRadius: radius.image, height: 138 },
   photoIndex: { backgroundColor: color.cameraChrome, borderRadius: radius.round, bottom: space.sm, paddingHorizontal: 9, paddingVertical: 5, position: 'absolute', right: space.sm },
   photoIndexText: { color: color.cameraText, fontFamily: type.ticketBold, fontSize: 12 },
+  mealNotes: { alignSelf: 'stretch' },
+  aiComment: { marginBottom: space.md, paddingHorizontal: 12 },
+  aiCommentLabel: { color: color.muted, fontFamily: type.ticketBold, fontSize: 13 },
+  aiCommentText: { color: color.ink, fontSize: 15, lineHeight: 21, marginTop: 4 },
   noteBlock: { backgroundColor: color.actionSoft, borderRadius: 12, marginBottom: space.md, paddingHorizontal: 12, paddingVertical: 2 },
   noteLabel: { color: color.action, fontFamily: type.ticketBold, fontSize: 13, letterSpacing: 0.5 },
   noteText: { color: color.ink, fontSize: 15, lineHeight: 21, marginTop: 3 },
