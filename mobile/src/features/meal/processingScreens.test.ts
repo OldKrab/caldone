@@ -43,8 +43,8 @@ function screen(name: 'HomeScreen' | 'MealDetailScreen') {
       if (specifier === 'react') return react;
       if (specifier === 'react/jsx-runtime') return { jsx, jsxs: jsx };
       if (specifier === 'react-native') return native;
-      if (specifier.endsWith('/MealProgress')) {
-        return { ...load(resolve(dirname(path), specifier + '.tsx')), MealProgress: 'MealProgress' };
+      if (specifier.endsWith('/MealWorkStatus')) {
+        return { ...load(resolve(dirname(path), specifier + '.tsx')), MealWorkStatus: 'MealWorkStatus' };
       }
       if (specifier.includes('components/')) return hosts({ useAppDialog: () => ({ show() {} }) });
       if (specifier.startsWith('expo-')) return {};
@@ -70,7 +70,7 @@ function nodes(tree: any, type: string): any[] {
       return tree.flatMap(value => nodes(value, type));
   if ([tree.props?.style].flat().some((style: any) => style?.display === 'none'))
       return [];
-  return [...(tree.type === type ? [tree] : []), ...nodes(tree.props?.children, type)];
+  return [...((tree.type === type || tree.type?.name === type) ? [tree] : []), ...nodes(tree.props?.children, type)];
 }
 const meal: any = { id: 'meal', capturedAt: 1, note: 'Lasagna', status: 'needs_input', photos: [], analysis: { title: 'Meal', mealType: 'snack', items: [], totals: { calories: 100, protein: 1, carbs: 10, fat: 2 }, clarification: { questions: ['How much?'], impactCalories: 200 } } };
 const props: any = { meal, units: { energy: 'kcal', weight: 'g' }, onBack() { }, onAnswer: async () => { }, onDelete() { }, onAskAssistant() { }, onSave: async () => { } };
@@ -78,13 +78,15 @@ test('meal question form disappears immediately after submitting and returns on 
   const render = screen('MealDetailScreen');
   let reject!: (error: Error) => void;
   const pending = new Promise<void>((_, fail) => { reject = fail; });
-  const input = { ...props, onAnswer: () => pending };
+  const input = { ...props, onAnswer: () => pending, activity: undefined as string | undefined };
   const form = nodes(render(input), 'QuestionAnswers')[0];
   assert.ok(form);
   const submission = form.props.onSubmit('I do not know');
+  input.activity = 'thinking'; // The app accepted and persisted the answer.
   assert.equal(nodes(render(input), 'QuestionAnswers').length, 0);
   reject(Error('offline'));
   await assert.rejects(submission, /offline/);
+  input.activity = undefined;
   assert.equal(nodes(render(input), 'QuestionAnswers').length, 1);
 });
 test('answering meal remains in the journal and opens the same record', () => {
@@ -96,12 +98,12 @@ test('answering meal remains in the journal and opens the same record', () => {
   row.props.onPress();
   assert.equal(opened, meal);
 });
-test('persisted processing hides stale questions and labels existing estimate unfinished', () => {
+test('persisted processing hides stale questions while retaining the previous estimate', () => {
   const tree = screen('MealDetailScreen')({ ...props, meal: { ...meal, status: 'analyzing' } });
   assert.equal(nodes(tree, 'QuestionAnswers').length, 0);
-  assert.equal(nodes(tree, 'MealProgress').length, 1);
-  assert.equal(nodes(tree, 'MealProgress')[0].props.compact, true);
-  assert.equal(nodes(tree, 'Text')[0].props.children, 'Meal');
+  assert.equal(nodes(tree, 'MealWorkStatus').length, 1);
+
+  assert.equal(nodes(tree, 'MealOverview')[0].props.analysis.totals.calories,100);
   const buttons = nodes(tree, 'PrimaryButton');
   assert.equal(buttons.length, 2);
   assert.equal(buttons[0].props.label, 'Edit or discuss');

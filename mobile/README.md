@@ -8,21 +8,29 @@ The production CalDone Android app, built with Expo, React Native, and TypeScrip
 2. Tap **Add meal** to open the camera directly. Gallery and **Describe meal** are secondary actions on the camera screen; manual nutrition entry is available from the description screen.
 3. Take or choose photos, or describe the meal in text, then start analysis.
 4. Return immediately to the Today screen while CalDone recognizes the complete meal.
-5. Answer any remaining clarification questions using the choices or by typing in the meal chat. Plain chat text is applied to the open clarification. Unanswered clarifications become **Estimated** after 24 hours.
+5. Answer remaining questions with selectable choices, custom text, or an ordinary chat message. Questions close only when the assistant applies the answer or dismisses an invalid question; unrelated discussion keeps them open. **Not sure** records uncertainty and keeps the estimate approximate.
 
 The Android home-screen widget opens directly into the camera. User-initiated meal analysis acquires an Android foreground service with a quiet notification and a bounded wake lock, allowing processing while other apps are open. WorkManager provides durable recovery after interruption, and returning to the app revisits delayed retries. Requests have a deadline and failures use bounded retries.
 
 Opening a meal exposes its nutrition breakdown, **Fix with AI**, and manual editing for items, portions, meal type, time, calories, and macros. The Today header navigates previous days, and Settings stores optional calorie and macro goals.
 
-After analysis and clarification finish, **Add dish** opens the same camera, gallery, and text flow for an existing meal. Only the new food is analyzed, with the original meal as context; its items and photos are appended while the original items, title, type, and time are preserved. Questions about an added dish remain scoped to that dish, including after restart or backup restore.
+After analysis and clarification finish, **Add dish** opens the same camera, gallery, and text flow for an existing meal. The same meal conversation handles the addition. New items and photos are appended while original item values, title, notes, type, and time are protected by the repository. Questions about an added dish remain scoped to that dish, including after restart or backup restore.
 
-Dish additions stay on the capture/description screen until analysis and saving finish. **Stop** or Android Back during analysis keeps the draft available; request failures and concurrent meal changes also retain it for retry. Unlike initial meal logging, an unfinished addition is not a durable background job: leaving the app process or force-stopping it before the save can lose that draft.
+Dish additions stay on the capture/description screen until analysis and saving finish. **Stop** or Android Back during analysis keeps the draft available; request failures and concurrent meal changes also retain it for retry. Once submitted, the addition and its input photos are durable and can resume after process interruption. An unsubmitted capture or text draft can still be lost when the process exits.
 
 Captured photos stay in private app storage and never enter the system gallery automatically. They remain attached to the meal so the user and assistant can inspect them later; saving or sharing a photo requires an explicit user action.
 
-Photo-free meals actively request web search for a suitable illustrative image when search is enabled. Nutrition can still complete if artwork research fails. The model can suggest up to three observed source pages; the app also checks search results without those hints, prioritizes relevant titles, and tries at most three pages (three seconds and 2 MiB each). It recognises labelled product images in page bodies, including lazy-loaded images, as well as preview metadata on matching pages. The journal marks artwork **Web**; meal details show **From web · illustrative** and link to the source. Image URLs remain separate from user photos and AI evidence, survive backups, and are preserved through portion clarification when the food names stay the same. Diagnostic exports include lookup outcomes and source hostnames, without page paths. Images are fetched remotely and are not guaranteed for every meal.
+Text-only meal research can attach one representative image from a matching search source's Open Graph or Twitter preview metadata. The journal marks it **Web**; meal details show **From web · illustrative** and link to the source. The app stores the image and source URLs separately from user photos, includes them in backups, and excludes artwork from later AI evidence. Loading the remote image needs network access. Missing previews, redirects, failed image loads, and page lookups exceeding three seconds are skipped without failing the meal. Artwork does not trigger an extra model search.
 
-The interface and formatting are localized in English and Russian. Provider authorization and multimodal transport remain isolated under `src/ai`; meal prompts, persistence, and processing live outside that boundary.
+The interface and formatting are localized in English and Russian. Provider authorization and multimodal transport live under `src/ai`; the shared assistant prompt and tools perform nutrition analysis directly. There is no separate meal-analyzer request behind a chat tool.
+
+## Persistent meal conversations
+
+Capture, meal forms, notifications, chat and additions use one primary conversation per meal. Existing primary history is reused; older secondary conversations remain readable and share current meal questions. The assistant reads current records and uses `edit_meal` to save nutrition together with question transitions. Each question has a stable ID and an explicit open, answered or dismissed state. Answers may resolve only part of a form, and unknown answers retain an uncertainty flag. A question can precede the first estimate when the available evidence is insufficient.
+
+The app saves accepted input before contacting the provider and saves completed assistant tool calls before executing them. A meal edit commits its question changes, Undo snapshot and replay receipt in one SQLite transaction. After interruption, completed edits are recovered from their receipts rather than applied twice; an unknown tool outcome requires rereading current data. Closing a screen detaches its observer without cancelling the conversation. Stop cancels further work but does not undo edits already committed. Each provider response has a three-minute deadline; the app rejects late tool output after cancellation or timeout.
+
+Backups preserve question IDs and states and conversation history. Importing a backup never restarts old pending requests. Credentials remain excluded.
 
 ## Run and verify
 

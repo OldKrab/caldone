@@ -68,3 +68,38 @@ test('failed tool exposes returned reason without exposing successful tool paylo
     assert.equal(items[0].tools[1].error, undefined);
   }
 });
+
+test('a hosted search uses the same activity group and replaces the generic waiting indicator', () => {
+  const items = buildActivityFeed({
+    messages: [assistant([call('read')]), result('read')],
+    actions: [], busy: true, mealActivity: 'thinking',
+    providerActivities: [{id: 'search', name: 'web_search', status: 'active', messageIndex: 2, blockIndex: 0}],
+  } as any) as any[];
+  assert.deepEqual(items.map(item => item.kind), ['activity']);
+  assert.deepEqual(items[0].tools.map((tool: any) => [tool.call.name, tool.status]), [['get_meal', 'completed'], ['web_search', 'running']]);
+});
+
+test('hosted work stays between surrounding prose and appears once before an empty streaming response', () => {
+  const input = {messages: [assistant([{type: 'text', text: 'I will look it up.'}]), assistant([], 3)],
+    actions: [], busy: true, providerActivities: [{id: 'search', name: 'web_search', status: 'active', messageIndex: 1, blockIndex: 0}]};
+  const items = buildActivityFeed(input as any);
+  assert.deepEqual(items.map(item => item.kind), ['message', 'activity']);
+  assert.equal(items.flatMap(item => item.kind === 'activity' ? item.tools : []).length, 1);
+});
+
+test('persisted questions remain actionable after unrelated chat and close by ID across every rendering',()=>{
+  const questions=[
+    {id:'portion',mealId:'meal',question:'How much?',options:['100 g','200 g'],state:'open',createdAt:1},
+    {id:'sauce',mealId:'meal',question:'Which sauce?',options:['None','Mayo'],state:'answered',answer:'None',createdAt:1},
+  ];
+  const input={messages:[assistant([{type:'toolCall',id:'ask-old',name:'ask_question',arguments:{}}]),
+    {...result('ask-old'),details:{questions}},
+    {role:'chatUser',text:'Why are you asking?',attachments:[],timestamp:3},
+    assistant([{type:'text',text:'To estimate the portion.'}],4)],questions,actions:[],busy:false};
+  const rendered=buildActivityFeed(input as any).filter(item=>item.kind==='question');
+  assert.equal(rendered.length,1);
+  assert.equal(rendered[0].active,true);
+  assert.deepEqual(rendered[0].questions.map(q=>q.id),['portion']);
+  const finished=buildActivityFeed({...input,questions:questions.map(q=>({...q,state:'answered'}))} as any);
+  assert.equal(finished.filter(item=>item.kind==='question').length,0);
+});

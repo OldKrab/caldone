@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fixture, meals } from '../test/mealAgentFixture.ts';
+import { fixture, meals } from '../testing/mealAgentTestContext.ts';
 import { defaultNotificationPreferences } from '../domain/preferences.ts';
 
 const { applyNotificationPreferences } = await import('./mealProcessor.ts');
 
 test('restoring notifications and saving a meal respect a permission denial', async () => {
   let prompts = 0;
-  fixture.notifications = {
+  fixture.notificationControls = {
     permission: { status: 'denied', granted: false, canAskAgain: true },
     request() { prompts++; return this.permission; },
   };
@@ -18,7 +18,7 @@ test('restoring notifications and saving a meal respect a permission denial', as
 
 test('an explicit notification opt-in can ask again after a denial', async () => {
   let prompts = 0;
-  fixture.notifications = {
+  fixture.notificationControls = {
     permission: { status: 'denied', granted: false, canAskAgain: true },
     request() { prompts++; return this.permission; },
   };
@@ -34,7 +34,7 @@ for (const [name, permission, expectedPrompts] of [
 ] as const) {
   test(`explicit opt-in respects OS permission state: ${name}`, async () => {
     let prompts = 0;
-    fixture.notifications = { permission, request() { prompts++; return this.permission; } };
+    fixture.notificationControls = { permission, request() { prompts++; return this.permission; } };
     await applyNotificationPreferences(defaultNotificationPreferences, false, { requestPermission: true });
     assert.equal(prompts, expectedPrompts);
   });
@@ -44,7 +44,7 @@ test('saving a meal still moves an enabled reminder to tomorrow without promptin
   context.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 8, 9, 14).getTime() });
   const scheduled: Date[] = [];
   const cancelled: string[] = [];
-  fixture.notifications = {
+  fixture.notificationControls = {
     permission: { status: 'denied', granted: false, canAskAgain: true },
     request() { assert.fail('Reminder maintenance must not request permission'); },
     schedule(request: { trigger: { date: Date } }) { scheduled.push(request.trigger.date); return `reminder-${scheduled.length}`; },

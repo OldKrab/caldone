@@ -1,14 +1,16 @@
 import type { DishAdditionState } from '../../services/backgroundDishAddition';
-import { MealWebImage } from '../../components/MealWebImage';
-import { MealProgress } from '../../components/MealProgress';
 import { QuestionAnswers } from '../../components/QuestionAnswers';
+import { MealWorkStatus, mealActivityLabel } from '../../components/MealWorkStatus';
+import { MealWebImage } from '../../components/MealWebImage';
 import { canAddDish } from '../../domain/mealAddition';
-import { mealQuestionChoices } from '../../domain/mealQuestions';
+import { mealQuestionChoicesFor } from '../../domain/mealQuestions';
+import type { QuestionAnswer } from '../../domain/chat';
 import { Ionicons } from '@expo/vector-icons';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import * as Sharing from 'expo-sharing';
 import { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Modal,
   Pressable,
@@ -52,7 +54,7 @@ export function MealDetailScreen(props: {
   onBack: () => void;
   onAddDish: () => void;
   onReanalyze: () => Promise<void>;
-  onAnswer: (answer: string) => Promise<void>;
+  onAnswer: (answer: string, references?: QuestionAnswer[]) => Promise<void>;
   onDelete: () => void;
   onAskAssistant: () => void;
   onSave: (capturedAt: number, analysis: MealAnalysis) => Promise<void>;
@@ -64,10 +66,11 @@ export function MealDetailScreen(props: {
   const [time, setTime] = useState(editableTime(props.meal.capturedAt));
   const [answering, setAnswering] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
-  const working = props.dishAddition?.status === 'running' || reanalyzing || answering || props.answerSubmitting || Boolean(props.activity) || props.meal.status === 'queued' || props.meal.status === 'analyzing';
+  const analysisBusy = props.dishAddition?.status === 'running' || reanalyzing || answering || Boolean(props.answerSubmitting || props.activity)
+    || props.meal.status === 'queued' || props.meal.status === 'analyzing';
 
   const reanalyze = async () => {
-    if (working) return;
+    if (analysisBusy) return;
     setReanalyzing(true);
     try { await props.onReanalyze(); }
     finally { setReanalyzing(false); }
@@ -100,12 +103,15 @@ export function MealDetailScreen(props: {
     }
   };
 
-  const submitClarification = async (answer: string) => {
+  const submitClarification = async (answer: string, references?: QuestionAnswer[]) => {
     if (!answer.trim() || answering || props.answerSubmitting) return;
     setAnswering(true);
     setError('');
     try {
-      await props.onAnswer(answer.trim());
+      await props.onAnswer(answer.trim(),references);
+    } catch (error) {
+      setError(locale === 'ru' ? 'Не удалось обработать ответ. Откройте чат, чтобы повторить запрос.' : 'Could not process the answer. Open the chat to retry.');
+      throw error;
     } finally {
       setAnswering(false);
     }
@@ -121,9 +127,9 @@ export function MealDetailScreen(props: {
   });
 
   const menuItems: AnchoredMenuItem[] = [
-    { label: t('editManually'), icon: 'create-outline', disabled: !draft || working,
+    { label: t('editManually'), icon: 'create-outline', disabled: !draft || analysisBusy,
       onPress: () => { setEditing(true); setError(''); } },
-    { label: t('reanalyzeMeal'), icon: 'refresh-outline', disabled: working, onPress: reanalyze },
+    { label: t('reanalyzeMeal'), icon: 'refresh-outline', disabled: analysisBusy, onPress: reanalyze },
     ...(!draft && props.meal.status === 'failed'
       ? [{ label: t('deleteMeal'), icon: 'trash-outline' as const, onPress: confirmDelete }] : []),
   ];
@@ -131,22 +137,46 @@ export function MealDetailScreen(props: {
   const bottomActions = !editing && !props.creating && (
     <View style={styles.actionsDock}>
       <PrimaryButton icon="chatbubble-outline" label={t('editOrDiscuss')} onPress={props.onAskAssistant} />
-      <PrimaryButton icon="add" label={t('addDish')} variant="outlined" disabled={!canAddDish(props.meal) || working || Boolean(props.dishAddition)} onPress={props.onAddDish} />
+      <PrimaryButton icon="add" label={t('addDish')} variant="outlined" disabled={!canAddDish(props.meal) || analysisBusy || Boolean(props.dishAddition)} onPress={props.onAddDish} />
     </View>
   );
 
+  // Work starts only after the input is accepted durably. Do not keep a disabled
+  // "Sending" form on screen for the rest of the model's response.
+  const questions=props.activity || props.meal.status === 'queued' || props.meal.status === 'analyzing' ? [] : mealQuestionChoicesFor(props.meal);
+
   if (!draft) {
+    const pendingWork = Boolean(props.activity) || props.meal.status === 'queued' || props.meal.status === 'analyzing';
+    const pendingLabel = pendingWork ? mealActivityLabel(props.activity)
+      : questions.length ? t('clarificationTitle')
+      : props.meal.status === 'failed' ? t('failed')
+      : locale === 'ru' ? 'Пока без оценки' : 'No estimate yet';
+    const pendingHelp = props.meal.status === 'failed' && !pendingWork
+      ? (locale === 'ru' ? 'Не удалось получить оценку. Повторите анализ или удалите запись.'
+        : 'The estimate could not be completed. Reanalyze the meal or delete this record.')
+      : pendingWork
+        ? (locale === 'ru' ? 'Можно вернуться к дневнику. Результат появится в записи.'
+          : 'You can return to your journal. The result will appear in this record.')
+        : (locale === 'ru' ? 'Сведений о еде пока недостаточно. Запись сохранена; добавить подробности можно в чате.'
+          : 'There is not enough food information yet. The meal is saved; you can add details in chat.');
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <KeyboardSafeArea>
         <Header title={t('mealDetails')} onBack={props.onBack} menuItems={menuItems} />
-        <View style={styles.loading}>
+        <ScrollView style={styles.scroll} contentContainerStyle={[styles.loading, questions.length > 0 && styles.pendingQuestions]}
+          keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled">
           {props.meal.photos[0] && <Image source={{ uri: props.meal.photos[0].uri }} style={styles.pendingPhoto} />}
-          {props.meal.status === 'failed' ? <Text selectable style={styles.loadingText}>{t('failed')}</Text> : <MealProgress mealId={props.meal.id} stage={props.activity} />}
-          <Text selectable style={styles.pendingHelp}>{props.meal.status === 'failed' ? (locale === 'ru' ? 'Не удалось получить оценку. Повторите анализ или удалите запись.' : 'The estimate could not be completed. Reanalyze the meal or delete this record.') : (locale === 'ru' ? 'Можно вернуться к дневнику. Результат появится в записи.' : 'You can return to your journal. The result will appear in this record.')}</Text>
-          <PrimaryButton label={locale === 'ru' ? 'К дневнику' : 'Back to journal'} onPress={props.onBack} />
-        </View>
+          {pendingWork && !questions.length && <ActivityIndicator color={color.action} />}
+          <Text selectable style={styles.loadingText}>{pendingLabel}</Text>
+          {questions.length ? (
+            <QuestionAnswers questions={questions}
+              disabled={answering || props.answerSubmitting || Boolean(props.activity)}
+              onSubmit={submitClarification} />
+          ) : <Text selectable style={styles.pendingHelp}>{pendingHelp}</Text>}
+          {!questions.length && <PrimaryButton label={locale === 'ru' ? 'К дневнику' : 'Back to journal'} onPress={props.onBack} />}
+          {error ? <Text selectable accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+        </ScrollView>
         {bottomActions}
-      </SafeAreaView>
+      </KeyboardSafeArea>
     );
   }
 
@@ -156,7 +186,7 @@ export function MealDetailScreen(props: {
         <Header
           actionLabel={editing || props.creating ? t('cancel') : undefined}
           menuItems={editing || props.creating ? undefined : menuItems}
-          title={t(props.creating ? 'addMeal' : editing ? 'editManually' : 'mealDetails')}
+          title={props.creating ? t('addMeal') : locale === 'ru' ? (editing ? 'Изменить запись' : 'Приём пищи') : (editing ? 'Edit meal' : 'Meal details')}
           onAction={() => { if (props.creating) return props.onBack(); setEditing((value) => !value); setError(''); }}
           onBack={props.onBack}
         />
@@ -168,16 +198,6 @@ export function MealDetailScreen(props: {
           style={styles.scroll}
         >
 
-        {!editing && <View style={styles.mealHeading}>
-          <Text selectable style={styles.title}>{draft.title}</Text>
-          <Text selectable style={styles.mealType}>{t(draft.mealType)} · {formatTime(props.meal.capturedAt)}</Text>
-          {props.meal.note.trim() && <View style={styles.noteBlock}>
-            <Text selectable style={styles.noteLabel}>{t('yourNote')}</Text>
-            <Text selectable style={styles.noteText}>{props.meal.note.trim()}</Text>
-          </View>}
-        </View>}
-
-        {!editing && working && <MealProgress mealId={props.meal.id} stage={props.activity} compact label={t(props.dishAddition ? 'backgroundDishWorking' : 'analyzing')} />}
         {!editing && props.dishAddition?.status === 'running' && <Text selectable style={styles.noteText}>{t('addingDish')}</Text>}
         {!editing && props.dishAddition?.status === 'running' && <PrimaryButton label={t('stop')} variant="outlined" onPress={() => props.onStopDishAddition?.()} />}
         {!editing && props.dishAddition?.status === 'failed' && <View style={styles.noteBlock}>
@@ -187,14 +207,12 @@ export function MealDetailScreen(props: {
           <PrimaryButton label={t('cancel')} variant="outlined" onPress={() => props.onDiscardDishAddition?.()} />
         </View>}
 
-        {!editing && !working && props.meal.status === 'needs_input' && <Text selectable style={styles.clarificationActivity}>{locale === 'ru' ? 'Предварительная оценка · ожидает уточнения' : 'Provisional estimate · awaiting clarification'}</Text>}
-        {!editing && !working && props.meal.status === 'failed' && <Text selectable style={styles.error}>{locale === 'ru' ? 'Пересчёт не завершён. Ниже — предыдущая оценка.' : 'Update failed. The previous estimate is shown below.'}</Text>}
-        {!editing && mealQuestions(draft.clarification).length > 0 && (
-          // Keep answer draft mounted so a failed request restores the typed answer.
-          <View style={[styles.clarification, working && { display: 'none' }]}>
+        {analysisBusy && <MealWorkStatus stage={props.activity} />}
+        {!editing && questions.length > 0 && (
+          <View style={styles.clarification}>
             <Text selectable style={styles.clarificationLabel}>{t('clarificationTitle')}</Text>
             <QuestionAnswers key={`${props.meal.id}-${JSON.stringify(draft.clarification)}`}
-              questions={mealQuestionChoices(draft.clarification)} disabled={answering || props.answerSubmitting}
+              questions={questions} disabled={answering || props.answerSubmitting || Boolean(props.activity)}
               onSubmit={submitClarification} />
             <Pressable accessibilityRole="button" onPress={props.onAskAssistant} style={styles.answerInChat}>
               <Ionicons name="chatbox-ellipses-outline" size={17} color={color.action} />
@@ -218,11 +236,12 @@ export function MealDetailScreen(props: {
             <MealEditor draft={draft} time={time} onChange={setDraft} onTimeChange={setTime} />
           </>
         ) : (
-          <MealOverview meal={props.meal} analysis={draft} units={props.units} hideNutrition={Boolean(working && props.dishAddition?.status !== 'running')} />
+          <MealOverview meal={props.meal} analysis={draft} units={props.units} />
         )}
 
         {error ? <Text selectable accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
 
+        {!editing && !canAddDish(props.meal) && <Text selectable style={styles.pendingHelp}>{t('addDishNotReady')}</Text>}
         </ScrollView>
         {bottomActions}
         {editing && <View style={styles.saveDock}>
@@ -262,7 +281,7 @@ function Header(props: {
   );
 }
 
-function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: NutritionUnits; hideNutrition: boolean }) {
+function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: NutritionUnits }) {
   const weight = mealWeightGrams(props.analysis.items.map((item) => item.quantity));
   const dialog = useAppDialog();
   const { fontScale, width } = useWindowDimensions();
@@ -304,7 +323,9 @@ function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: Nutrit
   return (
     <>
       <View style={styles.detailTicket}>
-        {!props.hideNutrition && props.analysis.items.length > 0 && <View style={styles.totalRow}>
+        <Text selectable style={styles.mealType}>{t(props.analysis.mealType)} · {formatTime(props.meal.capturedAt)}</Text>
+        <Text selectable style={styles.title}>{props.analysis.title}</Text>
+        <View style={styles.totalRow}>
           <Text selectable style={styles.totalCalories}>{formatNumber(displayEnergy(props.analysis.totals.calories, props.units))} {energyUnit(props.units)}</Text>
           <Text selectable style={styles.totalMacros}>
             {weight === null
@@ -314,7 +335,7 @@ function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: Nutrit
           <Text selectable style={styles.totalMacros}>
             {t('proteinShort')} {formatMacro(props.analysis.totals.protein, props.units)} · {t('carbsShort')} {formatMacro(props.analysis.totals.carbs, props.units)} · {t('fatShort')} {formatMacro(props.analysis.totals.fat, props.units)}
           </Text>
-        </View>}
+        </View>
       {props.meal.photos.length > 0 && (
         <ScrollView
           horizontal
@@ -344,7 +365,14 @@ function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: Nutrit
 
       {props.meal.photos.length === 0 && props.analysis.webImage && <MealWebImage key={props.analysis.webImage.url} image={props.analysis.webImage} />}
 
-        {!props.hideNutrition && props.analysis.items.length > 0 && <View style={styles.items}>
+      {props.meal.note.trim() && (
+        <View style={styles.noteBlock}>
+          <Text selectable style={styles.noteLabel}>{t('yourNote')}</Text>
+          <Text selectable style={styles.noteText}>{props.meal.note.trim()}</Text>
+        </View>
+      )}
+
+        <View style={styles.items}>
           {props.analysis.items.map((item, index) => {
             const per100g = caloriesPer100Grams(item.calories, item.quantity);
             return (
@@ -364,7 +392,7 @@ function MealOverview(props: { meal: Meal; analysis: MealAnalysis; units: Nutrit
               </View>
             </View>
           ); })}
-        </View>}
+        </View>
       </View>
 
       <Modal animationType="fade" onRequestClose={() => setOpenPhoto(undefined)} transparent visible={Boolean(openPhoto)}>
@@ -527,7 +555,6 @@ function formatMacro(grams: number, units: NutritionUnits): string {
 }
 
 const styles = StyleSheet.create({
-  actionsDock: { backgroundColor: color.canvas, borderTopColor: color.line, borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: space.md, paddingVertical: space.sm, gap: space.sm },
   saveDock: { paddingHorizontal: 20, paddingTop: 10, backgroundColor: color.canvas, borderTopColor: color.line, borderTopWidth: StyleSheet.hairlineWidth },
   deleteAction: { alignItems: 'center', justifyContent: 'center', minHeight: 48 },
   ingredientHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, paddingBottom: 10 },
@@ -543,7 +570,8 @@ const styles = StyleSheet.create({
   headerActionButton: { alignItems: 'flex-end', justifyContent: 'center', minHeight: 48, maxWidth: 88 },
   headerAction: { color: color.action, fontFamily: type.ticketBold, fontSize: 15, textAlign: 'right' },
   content: { paddingBottom: 48, paddingHorizontal: space.md, paddingTop: space.sm },
-  loading: { alignItems: 'center', flex: 1, justifyContent: 'center', padding: 28, gap: 16 },
+  loading: { alignItems: 'center', flexGrow: 1, justifyContent: 'center', padding: 28, gap: 16 },
+  pendingQuestions: { alignItems: 'stretch', justifyContent: 'flex-start', padding: space.lg },
   pendingPhoto: { width: 160, height: 160, borderRadius: 24, marginBottom: 12 },
   pendingHelp: { color: color.muted, fontSize: 15, lineHeight: 23, textAlign: 'center', marginBottom: 12 },
   loadingText: { color: color.muted, fontSize: 14, marginTop: space.sm },
@@ -551,20 +579,19 @@ const styles = StyleSheet.create({
   mealPhoto: { backgroundColor: color.camera, borderRadius: radius.image, height: 138 },
   photoIndex: { backgroundColor: color.cameraChrome, borderRadius: radius.round, bottom: space.sm, paddingHorizontal: 9, paddingVertical: 5, position: 'absolute', right: space.sm },
   photoIndexText: { color: color.cameraText, fontFamily: type.ticketBold, fontSize: 12 },
-  mealHeading: { gap: space.xs, marginBottom: space.sm },
-  noteBlock: { marginTop: space.sm, gap: space.xs },
-  noteLabel: { color: color.muted, fontSize: 12 },
-  noteText: { color: color.ink, fontSize: 15, lineHeight: 21 },
+  noteBlock: { backgroundColor: color.actionSoft, borderRadius: 12, marginBottom: space.md, paddingHorizontal: 12, paddingVertical: 2 },
+  noteLabel: { color: color.action, fontFamily: type.ticketBold, fontSize: 13, letterSpacing: 0.5 },
+  noteText: { color: color.ink, fontSize: 15, lineHeight: 21, marginTop: 3 },
   photoModal: { backgroundColor: color.camera, flex: 1, padding: space.md },
   fullPhoto: { flex: 1, width: '100%' },
   fullPhotoImage: { height: '100%', width: '100%' },
-  detailTicket: { gap: space.sm },
+  detailTicket: { paddingHorizontal: 4 },
   mealType: { color: color.muted, fontFamily: type.ticket, fontSize: 14 },
-  title: { color: color.ink, fontFamily: type.ticketBold, fontSize: 25, lineHeight: 31 },
-  totalRow: { marginTop: space.sm, paddingBottom: space.md, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth },
+  title: { color: color.ink, fontFamily: type.ticketBold, fontSize: 25, lineHeight: 31, marginTop: 4 },
+  totalRow: { marginTop: 14, marginBottom: 20, paddingBottom: 18, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth },
   totalCalories: { color: color.ink, fontFamily: type.ticketBold, fontSize: 23 },
   totalMacros: { color: color.muted, fontSize: 13, marginTop: 4 },
-  items: { gap: space.xs },
+  items: { marginTop: 12 },
   itemRow: { alignItems: 'flex-start', flexDirection: 'row', gap: space.md, paddingVertical: 13 },
   itemRowCompact: { flexDirection: 'column', gap: space.sm },
   divider: { borderTopColor: color.line, borderTopWidth: 1, borderStyle: 'dashed' },
@@ -575,6 +602,7 @@ const styles = StyleSheet.create({
   itemNutritionCompact: { alignItems: 'flex-start', maxWidth: '100%' },
   itemCalories: { color: color.ink, fontSize: 14, fontWeight: '600' },
   itemMacros: { color: color.muted, flexShrink: 1, fontSize: 11, marginTop: 4, textAlign: 'right' },
+  actionsDock: { backgroundColor: color.canvas, borderTopColor: color.line, borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: space.md, paddingVertical: space.sm, gap: space.sm },
   editWithAssistant: { alignItems: 'center', backgroundColor: color.actionSoft, borderColor: color.line, borderRadius: radius.surface, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: space.sm, marginBottom: 18, minHeight: 60, padding: space.sm },
   editWithAssistantIcon: { alignItems: 'center', backgroundColor: color.surfacePressed, borderRadius: radius.control, height: 42, justifyContent: 'center', width: 42 },
   editWithAssistantCopy: { flex: 1, minWidth: 0 },
@@ -584,7 +612,6 @@ const styles = StyleSheet.create({
   clarificationLabel: { color: color.pending, fontFamily: type.ticketBold, fontSize: 14, letterSpacing: 0.4 },
   answerInChat: { alignItems: 'center', borderTopColor: color.line, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: space.sm, marginTop: space.md, minHeight: 42, paddingTop: space.sm },
   answerInChatText: { color: color.action, flex: 1, fontFamily: type.ticketBold, fontSize: 14 },
-  clarificationActivity: { color: color.muted, fontSize: 12, marginTop: space.sm },
   correctionToggle: { borderColor: color.line, borderRadius: radius.control, borderWidth: StyleSheet.hairlineWidth, justifyContent: 'center', marginTop: space.lg, minHeight: 50, paddingHorizontal: space.md },
   correctionToggleText: { color: color.action, fontFamily: type.ticketBold, fontSize: 16, textAlign: 'center' },
   correction: { backgroundColor: color.surface, borderColor: color.line, borderRadius: radius.surface, borderStyle: 'solid', borderWidth: 1, marginTop: space.sm, padding: space.md },

@@ -4,6 +4,7 @@ import { database, transaction } from './database';
 
 import { newChatUserMessage, newMealQuestionMessage, type ChatAction, type ChatThread, type ChatUndo } from '../domain/chat';
 import { getMeal } from './mealRepository';
+import { initializeAgentQuestions, readAgentQuestions, notifyAgentQuestions } from './agentQuestionRepository';
 
 
 type ThreadRow = { id: string; title: string; created_at: number; updated_at: number; meal_id?: string | null; purpose?: string | null };
@@ -11,7 +12,14 @@ type MessageRow = { message_json: string };
 type ActionRow = { id: string; thread_id: string; label: string; created_at: number; undone: number; undo_json: string };
 
 export async function initializeChat(): Promise<void> {
+  await initializeAgentQuestions();
   await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS agent_turns (
+      id TEXT PRIMARY KEY NOT NULL, thread_id TEXT NOT NULL, meal_id TEXT,
+      message_json TEXT NOT NULL, state TEXT NOT NULL, created_at INTEGER NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER, error TEXT, research_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS agent_turns_thread ON agent_turns(thread_id, created_at);
     CREATE TABLE IF NOT EXISTS chat_threads (
       id TEXT PRIMARY KEY NOT NULL,
       title TEXT NOT NULL,
@@ -41,6 +49,8 @@ export async function initializeChat(): Promise<void> {
     CREATE INDEX IF NOT EXISTS chat_actions_thread_id ON chat_actions(thread_id, created_at DESC);
   `);
   const columns = await database.getAllAsync<{ name: string }>('PRAGMA table_info(chat_threads)');
+  const turnColumns = await database.getAllAsync<{name:string}>('PRAGMA table_info(agent_turns)');
+  if(!turnColumns.some(column=>column.name==='research_json'))await database.execAsync('ALTER TABLE agent_turns ADD COLUMN research_json TEXT;');
   if (!columns.some((column) => column.name === 'meal_id')) {
     await database.execAsync('ALTER TABLE chat_threads ADD COLUMN meal_id TEXT;');
   }
@@ -62,11 +72,6 @@ export async function createChatThread(context?: { mealId?: string; purpose?: 'm
     mealId: context?.mealId,
     purpose: context?.purpose,
   };
-  await database.runAsync(`DELETE FROM chat_threads
-    WHERE title = ''
-      AND meal_id IS NULL
-      AND id NOT IN (SELECT DISTINCT thread_id FROM chat_messages)
-      AND id NOT IN (SELECT DISTINCT thread_id FROM chat_actions)`);
   await database.runAsync(
     'INSERT INTO chat_threads (id, title, created_at, updated_at, meal_id, purpose) VALUES (?, ?, ?, ?, ?, ?)',
     thread.id,
@@ -79,10 +84,17 @@ export async function createChatThread(context?: { mealId?: string; purpose?: 'm
   return thread;
 }
 
-export async function ensureClarificationThread(mealId: string, title: string): Promise<ChatThread> {
+/** Keep the existing unique clarification-purpose encoding as the primary
+ * meal conversation marker, so upgrading does not fork or discard old history. */
+export async function ensureMealThread(mealId: string, title: string): Promise<ChatThread> {
   const existing = await preferredMealThread(mealId, true);
   if (existing) return existing;
   try {
+    const previous = await preferredMealThread(mealId,false);
+    if(previous){
+      await database.runAsync("UPDATE chat_threads SET purpose='clarification' WHERE id=?",previous.id);
+      return {...previous,purpose:'clarification'};
+    }
     return await createChatThread({ mealId, purpose: 'clarification', title: title.trim().slice(0, 64) });
   } catch (error) {
     const raced = await preferredMealThread(mealId, true);
@@ -90,6 +102,9 @@ export async function ensureClarificationThread(mealId: string, title: string): 
     throw error;
   }
 }
+
+/** Compatibility name for old callers; there is only one conversation path. */
+export const ensureClarificationThread = ensureMealThread;
 
 /** Keeps model questions in the durable meal conversation, not only in meal UI state. */
 export async function syncMealQuestionsToThread(
@@ -167,12 +182,17 @@ export async function deleteChatThread(id: string): Promise<void> {
     await database.runAsync('DELETE FROM chat_messages WHERE thread_id = ?', id);
     await database.runAsync('DELETE FROM chat_actions WHERE thread_id = ?', id);
     await database.runAsync('DELETE FROM chat_tool_receipts WHERE thread_id = ?', id);
+    await database.runAsync('DELETE FROM agent_turns WHERE thread_id = ?', id);
+    await database.runAsync('DELETE FROM agent_questions WHERE thread_id = ?', id);
     await database.runAsync('DELETE FROM chat_threads WHERE id = ?', id);
   });
+  const mealPhotos=await retainedInputPhotoUris();
   for (const uri of attachmentUris(messages)) {
+    if(mealPhotos.has(uri))continue;
     try { new File(uri).delete(); } catch { /* The attachment may already be absent. */ }
   }
   await discardDeletedMealPhotos(actions);
+  notifyAgentQuestions();
 }
 
 export async function loadChatMessages(threadId: string): Promise<AgentMessage[]> {
@@ -193,7 +213,10 @@ export async function saveChatMessages(threadId: string, messages: AgentMessage[
   await transaction((database) => writeMessages(database, threadId, messages));
 }
 
-async function writeMessages(database: typeof import('./database').database, threadId: string, messages: AgentMessage[]): Promise<void> {
+export async function writeMessages(database: typeof import('./database').database, threadId: string, messages: AgentMessage[]): Promise<void> {
+  // A retained screen can finish after the user deletes its conversation.
+  // Late persistence must not recreate orphaned history.
+  if (!await database.getFirstAsync('SELECT id FROM chat_threads WHERE id = ?', threadId)) return;
   // Only completed messages are persisted. Keep durable history and append unseen
   // messages: the active agent snapshot may not include externally added questions.
   // Compare the full payload, not timestamps alone (two messages can share a millisecond).
@@ -302,13 +325,14 @@ export async function exportChatData(includePhotos = false): Promise<unknown> {
     thread,
     messages: await Promise.all((await loadChatMessages(thread.id)).map((message) => exportableMessage(message, includePhotos))),
     actions: await listChatActions(thread.id),
+    questions: await readAgentQuestions({threadId:thread.id}),
   })));
 }
 
 export async function deleteAllChatData(): Promise<void> {
   const threads = await listChatThreads();
   const actions = (await Promise.all(threads.map((thread) => listChatActions(thread.id)))).flat();
-  await database.execAsync('DELETE FROM chat_messages; DELETE FROM chat_actions; DELETE FROM chat_threads; DELETE FROM chat_tool_receipts;');
+  await database.execAsync('DELETE FROM chat_messages; DELETE FROM chat_actions; DELETE FROM chat_threads; DELETE FROM chat_tool_receipts; DELETE FROM agent_turns; DELETE FROM agent_questions WHERE thread_id IS NOT NULL;');
   try {
     const directory = new Directory(Paths.document, 'chat-attachments');
     if (directory.exists) directory.delete();
@@ -316,6 +340,28 @@ export async function deleteAllChatData(): Promise<void> {
     // Database deletion remains authoritative when file cleanup is unavailable.
   }
   await discardDeletedMealPhotos(actions);
+}
+
+async function retainedMealPhotoUris():Promise<Set<string>>{
+  const rows=await database.getAllAsync<{photos_json:string}>('SELECT photos_json FROM meals');
+  return new Set(rows.flatMap(row=>(JSON.parse(row.photos_json) as {uri:string}[]).map(photo=>photo.uri)));
+}
+
+/** An accepted attachment remains owned by its conversation while a failed
+ * turn waits for retry, even when it has not yet been added to meal.photos. */
+export async function retainedInputPhotoUris():Promise<Set<string>>{
+  const retained=await retainedMealPhotoUris();
+  const rows=await database.getAllAsync<{message_json:string}>('SELECT message_json FROM chat_messages');
+  for(const row of rows){
+    const message=JSON.parse(row.message_json) as AgentMessage;
+    for(const uri of attachmentUris([message]))retained.add(uri);
+  }
+  const actions=await database.getAllAsync<{undo_json:string}>('SELECT undo_json FROM chat_actions WHERE undone=0');
+  for(const row of actions){
+    const undo=JSON.parse(row.undo_json) as ChatAction['undo'];
+    if(undo.kind==='restore_meal')for(const photo of undo.meal.photos)retained.add(photo.uri);
+  }
+  return retained;
 }
 
 function threadFromRow(row: ThreadRow): ChatThread {
@@ -362,10 +408,9 @@ function attachmentUris(messages: AgentMessage[]): string[] {
 }
 
 async function discardDeletedMealPhotos(actions: ChatAction[]): Promise<void> {
+  const retained=await retainedInputPhotoUris();
   for (const action of actions) {
     if (action.undone || action.undo.kind !== 'restore_meal') continue;
-    const current = await getMeal(action.undo.meal.id);
-    const retained = new Set(current?.photos.map((photo) => photo.uri) ?? []);
     for (const photo of action.undo.meal.photos) {
       if (retained.has(photo.uri)) continue;
       try { new File(photo.uri).delete(); } catch { /* The photo may already be absent. */ }

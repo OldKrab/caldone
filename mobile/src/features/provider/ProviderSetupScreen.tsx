@@ -25,6 +25,7 @@ import {
   getSelectedProvider,
   getThinkingLevel,
   getWebSearchEnabled,
+  refreshProviderModels,
   selectProvider,
   selectProviderModel,
   selectThinkingLevel,
@@ -52,15 +53,18 @@ export function ProviderSetupScreen(props: {
   completionLabel?: string;
   onComplete?: () => void | Promise<void>;
 }) {
+  const [catalog, setCatalog] = useState(getProviderOptions);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState('');
   const providers = useMemo(() => {
     const rank = (provider: ProviderOption) => {
       const index = preferredProviders.indexOf(provider.id);
       return index < 0 ? preferredProviders.length : index;
     };
-    return getProviderOptions().sort((left, right) =>
+    return [...catalog].sort((left, right) =>
       rank(left) - rank(right) || left.name.localeCompare(right.name),
     );
-  }, []);
+  }, [catalog]);
   const [connectedIds, setConnectedIds] = useState<string[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState('');
   const [expanded, setExpanded] = useState<ProviderOption>();
@@ -76,6 +80,21 @@ export function ProviderSetupScreen(props: {
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [pendingPrompt, setPendingPrompt] = useState<PendingPrompt>();
+
+  const refreshCatalog = async () => {
+    setCatalogLoading(true);
+    setCatalogError('');
+    try {
+      await refreshProviderModels(true);
+    } catch {
+      setCatalogError(locale === 'ru'
+        ? 'Не удалось обновить модели Codex. Проверьте соединение и повторите.'
+        : 'Could not refresh Codex models. Check your connection and try again.');
+    } finally {
+      setCatalog(getProviderOptions());
+      setCatalogLoading(false);
+    }
+  };
 
   const refreshConnectionState = async () => {
     const [connected, selected] = await Promise.all([
@@ -94,6 +113,7 @@ export function ProviderSetupScreen(props: {
       setWebSearch(searchEnabled);
       setThinkingLevel(await getThinkingLevel(selected, modelId));
     }
+    await refreshCatalog();
   };
 
   useEffect(() => {
@@ -216,13 +236,13 @@ export function ProviderSetupScreen(props: {
                 <View style={styles.configuration}>
                   <Pressable
                     accessibilityRole="button"
-                    onPress={() => setModelPickerOpen(true)}
+                    onPress={() => { setModelPickerOpen(true); void refreshCatalog(); }}
                     style={({ pressed }) => [styles.configurationRow, pressed && styles.pressed]}
                   >
                     <View style={styles.configurationCopy}>
                       <Text style={styles.configurationLabel}>{t('model')}</Text>
                       <Text numberOfLines={1} style={styles.configurationValue}>
-                        {selectedProvider.models.find((model) => model.id === selectedModelId)?.name ?? t('automatic')}
+                        {selectedProvider.models.find((model) => model.id === selectedModelId)?.name ?? selectedModelId ?? t('automatic')}
                       </Text>
                     </View>
                     <Ionicons name="chevron-forward" size={18} color={color.muted} />
@@ -306,7 +326,7 @@ export function ProviderSetupScreen(props: {
         </ScrollView>
       </ScreenReveal>
 
-      <ModelPicker provider={selectedProvider} selectedModelId={selectedModelId} visible={modelPickerOpen} onClose={() => setModelPickerOpen(false)} onSelect={chooseModel} />
+      <ModelPicker provider={selectedProvider} selectedModelId={selectedModelId} visible={modelPickerOpen} loading={catalogLoading} error={catalogError} onRefresh={() => void refreshCatalog()} onClose={() => setModelPickerOpen(false)} onSelect={chooseModel} />
       <ThinkingPicker levels={selectedModel?.thinkingLevels ?? []} selected={thinkingLevel} visible={thinkingPickerOpen} onClose={() => setThinkingPickerOpen(false)} onSelect={chooseThinking} />
       <ProviderPromptModal pending={pendingPrompt} onCancel={closePrompt} onComplete={() => setPendingPrompt(undefined)} />
     </KeyboardSafeArea>
@@ -343,7 +363,7 @@ function ProviderRow(props: { provider: ProviderOption; selected: boolean; onPre
   );
 }
 
-function ModelPicker(props: { provider?: ProviderOption; selectedModelId?: string; visible: boolean; onClose: () => void; onSelect: (modelId?: string) => void | Promise<void> }) {
+function ModelPicker(props: { provider?: ProviderOption; selectedModelId?: string; visible: boolean; loading: boolean; error: string; onRefresh: () => void; onClose: () => void; onSelect: (modelId?: string) => void | Promise<void> }) {
   const [search, setSearch] = useState('');
   useEffect(() => setSearch(''), [props.provider?.id, props.visible]);
   const matchingModels = props.provider?.models.filter((model) => `${model.name} ${model.id}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())) ?? [];
@@ -352,10 +372,12 @@ function ModelPicker(props: { provider?: ProviderOption; selectedModelId?: strin
       <SafeAreaView style={styles.modalBackdrop}>
         <View style={styles.modelPicker}>
           <View style={styles.modelPickerHeader}><Text selectable style={styles.promptTitle}>{t('chooseModel')}</Text><IconButton icon="close" label={t('close')} onPress={props.onClose} /></View>
+          {props.loading && <Text accessibilityLiveRegion="polite" style={styles.modelOptionDetail}>{locale === 'ru' ? 'Обновляю список моделей…' : 'Refreshing models…'}</Text>}
+          {!!props.error && <View><Text accessibilityRole="alert" style={styles.error}>{props.error}</Text><Pressable accessibilityRole="button" onPress={props.onRefresh}><Text style={styles.modelOptionTitle}>{locale === 'ru' ? 'Повторить' : 'Try again'}</Text></Pressable></View>}
           <ScrollView contentContainerStyle={styles.modelList} keyboardShouldPersistTaps="handled">
             <TextInput accessibilityLabel={locale === 'ru' ? 'Поиск модели' : 'Search models'} value={search} onChangeText={setSearch} placeholder={locale === 'ru' ? 'Найти модель…' : 'Find a model…'} placeholderTextColor={color.muted} style={styles.modelSearch} />
             <ModelRow label={t('automatic')} selected={!props.selectedModelId} onPress={() => void props.onSelect()} />
-            {matchingModels.length === 0 && <Text selectable style={styles.modelOptionDetail}>{locale === 'ru' ? 'Подходящих моделей нет' : 'No matching models'}</Text>}
+            {!props.loading && !props.error && matchingModels.length === 0 && <Text selectable style={styles.modelOptionDetail}>{locale === 'ru' ? 'Подходящих моделей нет' : 'No matching models'}</Text>}
             {matchingModels.map((model) => <ModelRow key={model.id} detail={model.id} label={model.name} selected={props.selectedModelId === model.id} onPress={() => void props.onSelect(model.id)} />)}
           </ScrollView>
         </View>

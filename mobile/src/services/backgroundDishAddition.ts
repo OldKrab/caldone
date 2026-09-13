@@ -1,7 +1,7 @@
 import { File } from 'expo-file-system';
 import type { MealPhoto } from '../domain/meal';
 import { t } from '../i18n';
-import { setMealActivity } from './mealActivity';
+import { retainedInputPhotoUris } from '../data/chatRepository';
 import { addDishToMeal } from './mealAddition';
 
 export type DishAdditionState = { status: 'running' | 'failed'; error?: string };
@@ -24,14 +24,12 @@ export function startDishAddition(id: string, input: Input): void {
 function run(id: string, job: Job): void {
   job.state = { status: 'running' };
   job.controller = new AbortController();
-  setMealActivity(id, 'reading_photos');
   publish();
-  void addDishToMeal(id, { ...job.input, signal: job.controller.signal, onActivity: stage => setMealActivity(id, stage) }).then(() => {
+  void addDishToMeal(id, { ...job.input, signal: job.controller.signal }).then(() => {
     jobs.delete(id);
   }, error => {
     job.state = { status: 'failed', error: error instanceof Error ? error.message : undefined };
   }).finally(() => {
-    setMealActivity(id);
     if (job.discard && jobs.get(id) === job) discardDishAddition(id);
     else publish();
   });
@@ -62,12 +60,15 @@ export function discardDishAddition(id: string): void {
     job.controller?.abort();
     return;
   }
+  void retainedInputPhotoUris().then(retained => {
   for (const photo of job.input.photos) {
+    if (retained.has(photo.uri)) continue;
     try {
       const file = new File(photo.uri);
       if (file.exists) file.delete();
     } catch { /* Best-effort cleanup must not block dismissing a failed job. */ }
   }
+  }).catch(() => undefined);
   jobs.delete(id);
   publish();
 }

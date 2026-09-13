@@ -5,11 +5,26 @@ import type { GoalProfile } from './goalEstimator';
 
 export type ChatAttachment = MealPhoto;
 
+export type QuestionAnswer = {questionId: string; answer: string};
+export type ChatSendOptions = {
+  requestId?: string;
+  /** Local cancellation only; never serialized into a message. */
+  signal?: AbortSignal;
+  questionAnswers?: QuestionAnswer[];
+  source?: 'chat' | 'capture' | 'form' | 'reanalyze' | 'addition';
+};
+
 export type ChatUserMessage = {
   role: 'chatUser';
   text: string;
   attachments: ChatAttachment[];
   timestamp: number;
+  id?: string;
+  questionAnswers?: QuestionAnswer[];
+  source?: ChatSendOptions['source'];
+  /** Captured by the repository when an addition is accepted. Remains stable
+   * across tool calls and recovery, even after new items have been saved. */
+  additionOriginalItemCount?: number;
 };
 
 export type ChatMealQuestionMessage = {

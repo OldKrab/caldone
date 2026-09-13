@@ -23,12 +23,12 @@ class ProcessingService : Service() {
     val channel = "caldone-active-analysis"
     if (Build.VERSION.SDK_INT >= 26) {
       getSystemService(NotificationManager::class.java).createNotificationChannel(
-        NotificationChannel(channel, "Meal analysis", NotificationManager.IMPORTANCE_LOW).apply { setSound(null, null) }
+        NotificationChannel(channel, "Background requests", NotificationManager.IMPORTANCE_LOW).apply { setSound(null, null) }
       )
     }
     val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, channel) else Notification.Builder(this)
     builder.setContentTitle(intent?.getStringExtra("title") ?: "CalDone")
-      .setContentText(intent?.getStringExtra("body") ?: "Analyzing meal")
+      .setContentText(intent?.getStringExtra("body") ?: "Processing request")
       .setSmallIcon(android.R.drawable.ic_menu_recent_history)
       .setOngoing(true).setOnlyAlertOnce(true).setCategory(Notification.CATEGORY_PROGRESS)
     packageManager.getLaunchIntentForPackage(packageName)?.let {

@@ -1,14 +1,15 @@
 import { useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { color, radius, space } from '../design/tokens';
-import { formatQuestionAnswers, type QuestionChoices } from '../domain/questionChoices';
+import { formatQuestionAnswers, questionAnswerReferences, type QuestionChoices } from '../domain/questionChoices';
+import type { QuestionAnswer } from '../domain/chat';
 import { locale, t } from '../i18n';
 
 /** Local choices are drafts. Only Send submits them through the normal answer path. */
 export function QuestionAnswers(props: {
   questions: QuestionChoices[];
   disabled?: boolean;
-  onSubmit: (answer: string) => Promise<void>;
+  onSubmit: (answer: string, references?: QuestionAnswer[]) => Promise<void>;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [custom, setCustom] = useState<Record<string, boolean>>({});
@@ -24,7 +25,7 @@ export function QuestionAnswers(props: {
     setSending(true);
     setError(false);
     try {
-      await props.onSubmit(answer);
+      await props.onSubmit(answer, questionAnswerReferences(props.questions,answers));
       setAnswers({});
       setCustom({});
     } catch {
@@ -36,27 +37,27 @@ export function QuestionAnswers(props: {
     }
   };
   return <View style={styles.root}>
-    {props.questions.map(({ question, options }) => <View key={question} style={styles.question}>
+    {props.questions.map(({ id, question, options }) => { const key=id??question; return <View key={key} style={styles.question}>
       <Text selectable style={styles.title}>{question}</Text>
       <View accessibilityRole="radiogroup" accessibilityLabel={question} style={styles.options}>
         {[...new Set([...options, notSure])].map(option => {
-          const selected = custom[question] !== true && answers[question] === option;
+          const selected = custom[key] !== true && answers[key] === option;
           return <Pressable key={option} accessibilityRole="radio" accessibilityState={{ checked: selected, disabled: Boolean(disabled) }} disabled={disabled}
-            onPress={() => { setAnswers(current => ({ ...current, [question]: option })); setCustom(current => ({ ...current, [question]: false })); }}
+            onPress={() => { setAnswers(current => ({ ...current, [key]: option })); setCustom(current => ({ ...current, [key]: false })); }}
             style={({ pressed }) => [styles.option, selected && styles.selected, pressed && styles.pressed, disabled && styles.disabled]}>
             <Text style={[styles.optionText, selected && styles.selectedText]}>{option}</Text>
           </Pressable>;
         })}
-        <Pressable accessibilityRole="radio" accessibilityState={{ checked: custom[question] === true, disabled: Boolean(disabled) }} disabled={disabled}
-          onPress={() => { if (custom[question] === true) return; setCustom(current => ({ ...current, [question]: true })); setAnswers(current => ({ ...current, [question]: '' })); }}
-          style={({ pressed }) => [styles.option, custom[question] === true && styles.selected, pressed && styles.pressed, disabled && styles.disabled]}>
-          <Text style={[styles.optionText, custom[question] === true && styles.selectedText]}>{locale === 'ru' ? 'Другой ответ' : 'Custom answer'}</Text>
+        <Pressable accessibilityRole="radio" accessibilityState={{ checked: custom[key] === true, disabled: Boolean(disabled) }} disabled={disabled}
+          onPress={() => { if (custom[key] === true) return; setCustom(current => ({ ...current, [key]: true })); setAnswers(current => ({ ...current, [key]: '' })); }}
+          style={({ pressed }) => [styles.option, custom[key] === true && styles.selected, pressed && styles.pressed, disabled && styles.disabled]}>
+          <Text style={[styles.optionText, custom[key] === true && styles.selectedText]}>{locale === 'ru' ? 'Другой ответ' : 'Custom answer'}</Text>
         </Pressable>
       </View>
-      {custom[question] === true && <TextInput accessibilityLabel={question} editable={!disabled} multiline
-        value={typeof answers[question] === 'string' ? answers[question] : ''} onChangeText={value => setAnswers(current => ({ ...current, [question]: value }))}
+      {custom[key] === true && <TextInput accessibilityLabel={question} editable={!disabled} multiline
+        value={typeof answers[key] === 'string' ? answers[key] : ''} onChangeText={value => setAnswers(current => ({ ...current, [key]: value }))}
         placeholder={t('answerPlaceholder')} placeholderTextColor={color.muted} style={styles.input} />}
-    </View>)}
+    </View>})}
     <Pressable accessibilityRole="button" accessibilityState={{ disabled: Boolean(disabled || !answer) }} disabled={disabled || !answer}
       onPress={() => void submit()} style={({ pressed }) => [styles.send, pressed && styles.sendPressed, (disabled || !answer) && styles.disabled]}>
       <Text style={styles.sendText}>{sending ? (locale === 'ru' ? 'Отправляю…' : 'Sending…') : (locale === 'ru' ? 'Отправить ответы' : 'Send answers')}</Text>

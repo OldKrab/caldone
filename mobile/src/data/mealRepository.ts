@@ -10,6 +10,7 @@ import type {
 import { parseGoalProfile, type GoalProfile } from '../domain/goalEstimator';
 import { normalizeMealPhotos } from '../domain/mealOperations';
 import { normalizeClarification } from '../domain/mealQuestions';
+import { initializeAgentQuestions, readMealQuestions, writeAgentQuestion, notifyAgentQuestions } from './agentQuestionRepository';
 
 
 type MealRow = {
@@ -91,32 +92,46 @@ export type SearchDiagnosticEvent = {
   status: 'active' | 'complete' | 'error';
 };
 
-export type ImageLookupDiagnosticEvent = import('../services/mealWebImage').ImageLookupEvent & {
-  id: string; createdAt: number; mealId: string; operation: 'image_lookup';
+/** Non-authoritative work must not turn a committed mutation into a failure.
+ * Record the boundary, without exporting observer errors or meal contents. */
+export type ObserverDiagnosticEvent = {
+  id: string; createdAt: number; operation: 'observer_error'; threadId: string;
+  stage: 'screen_refresh' | 'post_commit_refresh' | 'photo_cleanup'; toolCallId?: string;
 };
+export type DiagnosticEvent = AiDiagnosticEvent | LayoutDiagnosticEvent | LifecycleDiagnosticEvent | CameraDiagnosticEvent | SearchDiagnosticEvent | ObserverDiagnosticEvent | import('../ai/requestDiagnostics').RequestDiagnostic | import('../ai/requestDiagnostics').ToolDiagnostic;
 
-export type DiagnosticEvent = ImageLookupDiagnosticEvent | AiDiagnosticEvent | LayoutDiagnosticEvent | LifecycleDiagnosticEvent | CameraDiagnosticEvent | SearchDiagnosticEvent;
-
-function fromRow(row: MealRow): Meal {
+async function fromRow(row: MealRow, connection = database): Promise<Meal> {
   const parsedPhotos = JSON.parse(row.photos_json) as Array<Partial<MealPhoto> & Pick<MealPhoto, 'uri' | 'mimeType'>>;
   const parsedAnalysis = row.analysis_json ? (JSON.parse(row.analysis_json) as MealAnalysis) : undefined;
   const analysis = parsedAnalysis ? {
     ...parsedAnalysis,
     clarification: normalizeClarification(parsedAnalysis.clarification),
   } : undefined;
+  const questions = await readMealQuestions(row.id, analysis?.clarification, connection);
+  const open = questions.filter(question => question.state === 'open');
+  if (analysis && questions.length) {
+    // Compatibility view for existing meal screens and backups. The shared
+    // question records are authoritative, including after all questions close.
+    analysis.clarification = open.length ? {
+      questions: open.map(question => question.question), choices: open,
+      impactCalories: analysis.clarification?.impactCalories ?? 0,
+    } : undefined;
+  }
   return {
     id: row.id,
     revision: row.revision,
     capturedAt: row.captured_at,
-    status: row.status,
+    status: row.status==='complete' && open.length?'needs_input':row.status,
     note: row.note,
     photos: normalizeMealPhotos(row.id, row.captured_at, parsedPhotos),
     analysis,
     error: row.error ?? undefined,
+    questions,
   };
 }
 
 export async function initializeMeals(): Promise<void> {
+  await initializeAgentQuestions();
   await database.execAsync(`
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS meals (
@@ -200,7 +215,8 @@ export async function createMeal(input: {
 
 /** Restores a complete meal snapshot for assistant undo and recovery flows. */
 export async function saveMealRecord(meal: Meal): Promise<void> {
-  await database.runAsync(
+  await transaction(async connection => {
+  await connection.runAsync(
     `INSERT INTO meals (
        id, revision, captured_at, status, note, photos_json, analysis_json, error,
        clarification_at, attempts, next_attempt_at
@@ -226,6 +242,12 @@ export async function saveMealRecord(meal: Meal): Promise<void> {
     meal.error ?? null,
     meal.analysis?.clarification ? Date.now() : null,
   );
+  if (meal.questions !== undefined) {
+    await connection.runAsync('DELETE FROM agent_questions WHERE meal_id = ?', meal.id);
+    for (const question of meal.questions) await writeAgentQuestion({...question, mealId:meal.id}, connection);
+    notifyAgentQuestions();
+  }
+  });
 }
 
 export async function replaceMeal(input: Meal): Promise<void> {
@@ -234,7 +256,12 @@ export async function replaceMeal(input: Meal): Promise<void> {
 
 /** Replaces a meal only if no UI or background analysis changed it since it was read. */
 export async function replaceMealIfRevision(input: Meal, expectedRevision: number): Promise<Meal | undefined> {
-  const result = await database.runAsync(
+  return writeMealIfRevision(database, input, expectedRevision);
+}
+
+/** The caller owns the transaction when a meal and its tool receipt commit together. */
+export async function writeMealIfRevision(connection: typeof database, input: Meal, expectedRevision: number): Promise<Meal | undefined> {
+  const result = await connection.runAsync(
     `UPDATE meals SET
        revision = revision + 1,
        captured_at = ?, status = ?, note = ?, photos_json = ?, analysis_json = ?, error = ?,
@@ -250,17 +277,21 @@ export async function replaceMealIfRevision(input: Meal, expectedRevision: numbe
     input.id,
     expectedRevision,
   );
-  return result.changes === 1 ? getMeal(input.id) : undefined;
+  return result.changes === 1 ? readMeal(connection, input.id) : undefined;
 }
 
 export async function listMeals(): Promise<Meal[]> {
   const rows = await database.getAllAsync<MealRow>('SELECT * FROM meals ORDER BY captured_at DESC');
-  return rows.map(fromRow);
+  return Promise.all(rows.map(row => fromRow(row)));
 }
 
 export async function getMeal(id: string): Promise<Meal | undefined> {
-  const row = await database.getFirstAsync<MealRow>('SELECT * FROM meals WHERE id = ?', id);
-  return row ? fromRow(row) : undefined;
+  return readMeal(database, id);
+}
+
+export async function readMeal(connection: typeof database, id: string): Promise<Meal | undefined> {
+  const row = await connection.getFirstAsync<MealRow>('SELECT * FROM meals WHERE id = ?', id);
+  return row ? fromRow(row, connection) : undefined;
 }
 
 export async function setMealStatus(id: string, status: MealStatus, error?: string): Promise<void> {
@@ -310,7 +341,7 @@ export async function listProcessableMeals(now = Date.now()): Promise<Meal[]> {
      ORDER BY captured_at ASC`,
     now,
   );
-  return rows.map(fromRow);
+  return Promise.all(rows.map(row => fromRow(row)));
 }
 
 export async function saveMealAnalysis(id: string, analysis: MealAnalysis): Promise<void> {
@@ -342,12 +373,23 @@ export async function updateMeal(id: string, input: {
 }
 
 export async function deleteMeal(id: string): Promise<void> {
-  await database.runAsync('DELETE FROM meals WHERE id = ?', id);
+  await transaction(async connection=>{
+    await connection.runAsync('DELETE FROM meals WHERE id = ?', id);
+    await connection.runAsync('DELETE FROM agent_questions WHERE meal_id = ?', id);
+    await connection.runAsync('DELETE FROM agent_turns WHERE meal_id = ?', id);
+  });
+  notifyAgentQuestions();
 }
 
 export async function deleteMealIfRevision(id: string, expectedRevision: number): Promise<boolean> {
-  const result = await database.runAsync('DELETE FROM meals WHERE id = ? AND revision = ?', id, expectedRevision);
-  return result.changes === 1;
+  return transaction(async connection=>{
+    const result=await connection.runAsync('DELETE FROM meals WHERE id = ? AND revision = ?', id, expectedRevision);
+    if(result.changes!==1)return false;
+    await connection.runAsync('DELETE FROM agent_questions WHERE meal_id = ?', id);
+    await connection.runAsync('DELETE FROM agent_turns WHERE meal_id = ?', id);
+    notifyAgentQuestions();
+    return true;
+  });
 }
 
 export async function getDailyGoals(): Promise<DailyGoals> {
@@ -422,6 +464,8 @@ export async function deleteAllMeals(): Promise<MealPhoto[]> {
   await database.execAsync(`
     DELETE FROM meals;
     DELETE FROM diagnostic_events;
+    DELETE FROM agent_questions WHERE meal_id IS NOT NULL;
+    DELETE FROM agent_turns WHERE meal_id IS NOT NULL;
     DELETE FROM preferences WHERE key IN ('goal_profile', 'daily_goals');
   `);
   return meals.flatMap((meal) => meal.photos);

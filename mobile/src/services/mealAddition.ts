@@ -1,46 +1,31 @@
-import type { MealActivityStage } from './mealActivity';
-import { File } from 'expo-file-system';
-import { analyzeMeal } from '../ai/piClient';
+import { getMeal } from '../data/mealRepository';
+import { pendingAgentTurn } from '../data/agentTurnRepository';
 import { hasMealInput } from '../ai/mealInput';
-import { getMeal, replaceMealIfRevision } from '../data/mealRepository';
-import { parseMealAnalysis, type MealPhoto } from '../domain/meal';
-import { appendMealDish, canAddDish } from '../domain/mealAddition';
-import { locale, t } from '../i18n';
-import { beginForegroundWork } from './foregroundWork';
+import { canAddDish } from '../domain/mealAddition';
+import type { MealPhoto } from '../domain/meal';
+import { sendMealMessage, resumeMealConversation } from './mealConversation';
+import { t } from '../i18n';
 
-const adding = new Set<string>();
-
-/** The caller owns draft photos until this atomic save succeeds. A failed or
- * stale request leaves the original meal intact and the draft available to retry.
- * No pending meal status is written: restart recovery must never analyze the
- * original evidence as if it were the new dish. */
-export async function addDishToMeal(id: string, input: { photos: MealPhoto[]; note: string; signal?: AbortSignal; onActivity?: (stage: MealActivityStage) => void }): Promise<void> {
-  if (adding.has(id)) throw new Error(t('analysisAlreadyRunning'));
-  if (!hasMealInput(input)) throw new Error(t('addDishError'));
-  adding.add(id);
-  let release: (() => Promise<void>) | undefined;
-  try {
-    input.signal?.throwIfAborted();
-    const meal = await getMeal(id);
-    if (!meal || !canAddDish(meal)) throw new Error(t('addDishNotReady'));
-    release = await beginForegroundWork();
-    const photos = await Promise.all(input.photos.map(async photo => ({
-      base64: await new File(photo.uri).base64(), mimeType: photo.mimeType,
-    })));
-    input.onActivity?.('thinking');
-    const result = await analyzeMeal({
-      mealId: id, photos, note: input.note, existingMeal: meal.analysis,
-      signal: input.signal, onActivity: input.onActivity,
-      language: locale === 'ru' ? 'Russian' : 'English',
-    });
-    const analysis = parseMealAnalysis(result.text);
-    if (!analysis.items.length) throw new Error(t('addDishError'));
-    const updated = appendMealDish(meal, { ...input, analysis });
-    input.signal?.throwIfAborted();
-    input.onActivity?.('saving_result');
-    if (!await replaceMealIfRevision(updated, meal.revision)) throw new Error(t('addDishChanged'));
-  } finally {
-    adding.delete(id);
-    await release?.().catch(() => undefined);
+/** An addition is a message in the meal's conversation. Once accepted, its
+ * photos belong to that durable input even if inference later fails. */
+export async function addDishToMeal(
+  id: string,
+  input: { photos: MealPhoto[]; note: string; signal?: AbortSignal },
+): Promise<void> {
+  input.signal?.throwIfAborted();
+  const meal = await getMeal(id);
+  if (!meal || !hasMealInput(input)) throw new Error(t('addDishError'));
+  const text = `Добавь к этой записи только новую еду из этого сообщения. Сохрани прежние позиции и их значения, название, описание, время и тип приёма пищи. Описание добавления: ${input.note}`;
+  const pending = await pendingAgentTurn({ mealId: id });
+  if (
+    pending?.message.source === 'addition' &&
+    pending.message.text === text &&
+    JSON.stringify(pending.message.attachments.map((photo) => photo.id)) ===
+      JSON.stringify(input.photos.map((photo) => photo.id))
+  ) {
+    await resumeMealConversation(id, input.signal);
+    return;
   }
+  if (!canAddDish(meal)) throw new Error(t('addDishNotReady'));
+  await sendMealMessage(id, text, input.photos, { source: 'addition', signal: input.signal });
 }

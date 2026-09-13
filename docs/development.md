@@ -105,3 +105,12 @@ node scripts/check-app-dialog.mjs 'У вас последняя совмести
 ```
 
 Pass the displayed message and action in the current app language. Use `ADB` or `ANDROID_HOME` to locate adb and `ANDROID_SERIAL` to select a device. The check saves a screenshot and native hierarchy, then verifies that a scroll gesture cannot reveal clipped text in the short notice. Run at normal and enlarged font sizes; separately verify that long release notes scroll while the action rows stay visible.
+
+
+## Agent recovery checks
+
+`npm test` in `mobile/` covers the shared meal agent with the production Pi agent, tool implementations, request encoder, SSE parser and SQLite repositories. The native test adapter replaces Android bridges and external HTTP only. Scripted provider responses check persistence and tool behavior; they do not establish a model's semantic accuracy.
+
+`agentProcessRecovery.test.ts` starts two separate Node processes against a file-backed database. The first exits immediately after a meal edit commits and before the tool result reaches conversation history. The second restores the request from its receipt and checks that input, nutrition edits and Undo actions are not duplicated. Deadline tests also verify that a late provider response cannot execute a mutation.
+
+For model behavior, run representative authorized inputs through the same production agent with live provider HTTP and keep private evidence in ignored `artifacts/`. Include initial photos, disputed identities, discussion without mutation, partial forms, indirect answers, Not sure, additions, search settings and interrupted requests. Model recognition and estimated nutrition can vary; record actual outcomes rather than treating scripted tests as live inference proof. Native component harness screenshots verify layout and interaction only; they are not full-app provider or background-execution evidence.
