@@ -60,10 +60,13 @@ export function createUpdateChecker(deps: {
 }
 const versionParts = (value: string) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(value)?.slice(1).map(Number);
 function newer(candidate: string, installed: string) {
-  const a = versionParts(candidate), b = versionParts(installed);
+  // Published candidates stay stable-only. An installed prerelease precedes
+  // the stable version with the same core; Android still verifies versionCode.
+  const installedMatch = /^v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(installed);
+  const a = versionParts(candidate), b = installedMatch?.slice(1, 4).map(Number);
   if (!a || !b) return false;
   for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i]! > b[i]!;
-  return false;
+  return Boolean(installedMatch?.[4]);
 }
 
 /** Release names only discover candidates. Android verifies the downloaded APK's

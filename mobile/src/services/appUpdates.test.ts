@@ -78,3 +78,13 @@ test('a successful upgrade cannot offer the cached equal-version release again',
   });
   assert.equal((await checker.check()).release, undefined);
 });
+
+test('preview installations discover the stable release of the same or a newer version', () => {
+  for (const installed of ['1.3.0-preview', '1.3.0-preview.2', '1.2.12-preview']) {
+    assert.equal(selectRelease([release], installed, ['arm64-v8a'])?.version, '1.3.0');
+  }
+  assert.equal(selectRelease([release], '1.4.0-preview', ['arm64-v8a']), undefined);
+  assert.equal(selectRelease([release], '1.3.0', ['arm64-v8a']), undefined);
+  assert.equal(selectRelease([release], 'invalid-preview', ['arm64-v8a']), undefined);
+  assert.equal(selectRelease([{...release, tag_name:'v1.3.0-preview', prerelease:false}], '1.2.9', ['arm64-v8a']), undefined);
+});
