@@ -13,6 +13,7 @@ function screen(name: 'HomeScreen' | 'MealDetailScreen') {
   let cursor = 0;
   const jsx = (type: any, props: any, key: any) => ({ type, props, key });
   const react = {
+    useRef: (current: any) => ({current}),
     useState(initial: any) {
       const index = cursor++;
       if (!(index in state)) state[index] = typeof initial === 'function' ? initial() : initial;
@@ -46,6 +47,7 @@ function screen(name: 'HomeScreen' | 'MealDetailScreen') {
       if (specifier.endsWith('/MealWorkStatus')) {
         return { ...load(resolve(dirname(path), specifier + '.tsx')), MealWorkStatus: 'MealWorkStatus' };
       }
+      if (specifier.endsWith('/adaptiveScreen')) return load(resolve(dirname(path), specifier + '.ts'));
       if (specifier.includes('components/')) return hosts({ useAppDialog: () => ({ show() {} }) });
       if (specifier.startsWith('expo-')) return {};
       if (specifier === '@expo/vector-icons') return { Ionicons: 'Icon' };
@@ -140,4 +142,26 @@ test('the journal distinguishes a missing estimate from an actual open question'
   assert.ok(texts(meal).includes('A question about your meal'));
   assert.ok(texts({...noEstimate,status:'failed'}).includes('Let’s try this meal again'));
   assert.ok(!texts({...meal,analysis:{...meal.analysis,clarification:undefined},questions:[]}).includes('A question about your meal'));
+});
+
+test('meal details label user input and AI comments separately, even without an estimate', () => {
+  // Resolve local function components as well as host views, so assertions read
+  // the actual rendered copy rather than a component's props or source text.
+  const expand = (tree: any): any => {
+    if (Array.isArray(tree)) return tree.map(expand);
+    if (!tree || typeof tree !== 'object') return tree;
+    if (typeof tree.type === 'function') return expand(tree.type(tree.props));
+    return {...tree, props:{...tree.props, children:expand(tree.props?.children)}};
+  };
+  for (const analysis of [undefined, meal.analysis]) {
+    const render = screen('MealDetailScreen');
+    const record = {...meal, analysis, note:'My original words', aiComment:'Oil estimated at 5 g.'};
+    const text = nodes(expand(render({...props, meal:record})), 'Text').map(node=>node.props.children);
+    assert.ok(text.includes('Your note'));
+    assert.ok(text.includes('My original words'));
+    assert.ok(text.includes('AI comment'));
+    assert.ok(text.includes('Oil estimated at 5 g.'));
+  }
+  const text = nodes(expand(screen('MealDetailScreen')({...props, meal:{...meal,aiComment:'  '}})), 'Text');
+  assert.ok(!text.some(node=>node.props.children==='AI comment'));
 });

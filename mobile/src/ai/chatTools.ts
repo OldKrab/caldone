@@ -35,11 +35,11 @@ type GetMealParams = ActivityParams & { mealId: string };
 type ViewMealPhotosParams = ActivityParams & { mealId: string; photoIds?: string[] };
 type NutritionSummaryParams = ActivityParams & { from: string; to: string; groupByDay?: boolean; compareToGoals?: boolean };
 type CreateMealParams = ActivityParams & {
-  title: string; mealType: MealAnalysis['mealType']; capturedAt?: string; note?: string;
+  title: string; mealType: MealAnalysis['mealType']; capturedAt?: string; note?: string; aiComment?: string;
   items: MealItem[]; attachmentIds?: string[];
 };
 type EditMealParams = ActivityParams & {
-  mealId: string; expectedRevision: number; capturedAt?: string; note?: string; title?: string;
+  mealId: string; expectedRevision: number; capturedAt?: string; note?: string; aiComment?: string; title?: string;
   mealType?: MealAnalysis['mealType']; items?: MealItem[]; portionGrams?: number; addAttachmentIds?: string[]; removePhotoIds?: string[];
   questions?: QuestionChoices[]; resolutions?: QuestionResolution[]; webImageSourceUrl?: string;
 };
@@ -187,7 +187,8 @@ export function createCalDoneTools(input: {
       parameters: Type.Object({
         title: Type.String({ minLength: 1 }), mealType: mealTypeSchema,
         capturedAt: Type.Optional(Type.String({ description: 'ISO timestamp. Omit for now.' })),
-        note: Type.Optional(Type.String()), items: Type.Array(itemSchema, { minItems: 1 }),
+        note: Type.Optional(Type.String({ description: 'Only the user’s own words, copied verbatim. Put your explanations in aiComment.' })),
+        aiComment: Type.Optional(Type.String({ maxLength: 4_000, description: 'Your concise plain-text comment in the user language: relevant assumptions or limitations.' })), items: Type.Array(itemSchema, { minItems: 1 }),
         attachmentIds: Type.Optional(Type.Array(Type.String())), statusText: activitySchema,
       }, { additionalProperties: false }),
       execute: async (callId, rawParams) => withReceipt(callId, input.threadId, async () => {
@@ -212,6 +213,7 @@ export function createCalDoneTools(input: {
         mealId: Type.String(), expectedRevision: Type.Number({ minimum: 1 }),
         capturedAt: Type.Optional(Type.String({ description: 'ISO timestamp.' })),
         title: Type.Optional(Type.String({ minLength: 1 })), mealType: Type.Optional(mealTypeSchema),
+        aiComment: Type.Optional(Type.String({ maxLength: 4_000, description: 'Your concise plain-text comment in the user language: relevant assumptions or limitations, never user-authored text. Omit to keep it; use an empty string to clear it.' })),
         portionGrams: Type.Optional(Type.Number({exclusiveMinimum:0,maximum:100_000,description:'Corrected grams for one saved item. Do not combine with items.'})),
         items: Type.Optional(Type.Array(itemSchema, { minItems: 1 })), addAttachmentIds: Type.Optional(Type.Array(Type.String())),
         removePhotoIds: Type.Optional(Type.Array(Type.String())),
@@ -240,7 +242,7 @@ export function createCalDoneTools(input: {
         const webImage = await resolveMealWebImage(params.webImageSourceUrl, research, before.photos.length + addedPhotos.length > 0, undefined, items ? analysisFromItems({title:params.title ?? before.analysis?.title ?? t('meal'), mealType:params.mealType ?? before.analysis?.mealType ?? 'snack', items}) : before.analysis);
         const result = await commitMealAgentEdit({
           callId, threadId:input.threadId, mealId:before.id, expectedRevision:params.expectedRevision,
-          edit:{capturedAt:parseTimestamp(params.capturedAt),note:params.note,title:params.title,mealType:params.mealType,
+          edit:{capturedAt:parseTimestamp(params.capturedAt),note:params.note,aiComment:params.aiComment,title:params.title,mealType:params.mealType,
             items,addPhotos:addedPhotos,removePhotoIds:params.removePhotoIds},
           questions:params.questions,resolutions:params.resolutions,
           research, webImage,
@@ -392,7 +394,7 @@ function mealSummary(meal: Meal) {
   return {
     id: meal.id, revision: meal.revision, capturedAt: new Date(meal.capturedAt).toISOString(), status: meal.status,
     title: meal.analysis?.title, mealType: meal.analysis?.mealType, totals: meal.analysis?.totals,
-    research: meal.analysis?.research, note: meal.note, photoCount: meal.photos.length, clarification: meal.analysis?.clarification, questions: meal.questions, error: meal.error,
+    research: meal.analysis?.research, note: meal.note, aiComment: meal.aiComment, photoCount: meal.photos.length, clarification: meal.analysis?.clarification, questions: meal.questions, error: meal.error,
   };
 }
 
@@ -407,7 +409,7 @@ async function createCompleteMeal(mealId: string, params: CreateMealParams, atta
   const photos = await copyAttachments(mealId, params.attachmentIds ?? [], attachments);
   const meal: Meal = {
     id: mealId, revision: 1, capturedAt: parseTimestamp(params.capturedAt) ?? Date.now(), status: 'complete',
-    note: params.note?.trim() ?? '', photos,
+    note: params.note?.trim() ?? '', aiComment: params.aiComment?.trim() || undefined, photos,
     analysis: analysisFromItems({ title: params.title, mealType: params.mealType, items: params.items }),
   };
   await saveMealRecord(meal);
@@ -415,7 +417,7 @@ async function createCompleteMeal(mealId: string, params: CreateMealParams, atta
 }
 
 function requireMealEdit(params: EditMealParams): void {
-  const fields = [params.capturedAt, params.note, params.title, params.mealType, params.items, params.portionGrams, params.addAttachmentIds, params.removePhotoIds, params.questions, params.resolutions];
+  const fields = [params.capturedAt, params.note, params.aiComment, params.title, params.mealType, params.items, params.portionGrams, params.addAttachmentIds, params.removePhotoIds, params.questions, params.resolutions];
   if (fields.every((value) => value === undefined)) throw new Error('No meal fields were provided to change.');
 }
 

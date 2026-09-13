@@ -146,6 +146,8 @@ function parseMeal(value: unknown): BackupMeal {
     capturedAt: positiveNumber(source.capturedAt, 'meal.capturedAt'),
     status,
     note: text(source.note ?? '', 'meal.note', 100_000),
+    aiComment: source.aiComment === undefined || source.aiComment === null
+      ? undefined : text(source.aiComment, 'meal.aiComment', 4_000).trim() || undefined,
     photos: array(source.photos ?? [], 'meal.photos', 100).map(parsePhoto),
     analysis,
     error: source.error === undefined || source.error === null ? undefined : text(source.error, 'meal.error', 20_000),

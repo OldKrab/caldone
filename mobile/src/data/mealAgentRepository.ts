@@ -41,9 +41,12 @@ export async function commitMealAgentEdit(input: {
     if (before.revision !== input.expectedRevision)
       throw new Error('This meal changed. Read it again before retrying.');
     // This field is the user's original input, displayed as "Your note".
-    // Model assumptions and form answers belong to the conversation, not here.
+    // Model explanations belong to aiComment or the conversation, not here.
     if (input.edit.note !== undefined && input.edit.note !== before.note)
-      throw new Error('The original user note is read-only. Keep explanations and assumptions in the conversation.');
+      throw new Error('The original user note is read-only. Use aiComment for explanations and assumptions.');
+    if (input.edit.aiComment !== undefined &&
+        (typeof input.edit.aiComment !== 'string' || input.edit.aiComment.length > 4_000))
+      throw new Error('AI comments must be text of at most 4000 characters.');
     if (
       input.edit.items !== undefined &&
       (!input.edit.items.length ||

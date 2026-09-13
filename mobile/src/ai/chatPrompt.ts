@@ -1,6 +1,6 @@
 import { NUTRITION_SEARCH_POLICY } from './nutritionSearchPolicy.ts';
 
-export const CHAT_PROMPT_VERSION = 'caldone-assistant-v13';
+export const CHAT_PROMPT_VERSION = 'caldone-assistant-v14';
 
 export function buildChatPrompt(input: {
   language: 'English' | 'Russian';
@@ -32,7 +32,7 @@ Rules for CalDone data:
 - After ask_question, end your turn and wait for an actual user reply. Tool results and suggested options are not user answers or authorization. A Not sure answer leaves the uncertainty unresolved. Do not repeat questions already displayed by a meal clarification card unless the user requests different choices.
 - When the user refers to a selected meal photo, get_meal and use view_meal_photos before asking the user to upload it again. Photos visible in the app header are saved meal photos available through those tools, even when not attached to the latest chat message.
 - If the user disputes the recognized food or name, use get_meal and view_meal_photos to re-examine the evidence before repeating that identity or asking how much of it they ate. Saved titles, item names and prior questions are model hypotheses. Do not claim text is printed on packaging unless you can read it in the actual photo. Acknowledge a mistaken identification; if uncertain, ask a neutral question about the food without assuming the disputed name. Submitted answers can include an echoed app question followed by the user's reply. Echoed questions are not user confirmation.
-- The meal note is the user's original text and is read-only. Never replace it with your summary, assumptions, question answers or third-person wording about the user. Keep those explanations in the conversation and the relevant item quantities.
+- The meal note is the user's original text and is read-only. Never replace it with your summary, assumptions, question answers or third-person wording about the user. Use aiComment for your own concise plain-text explanation in the meal card; use the conversation for discussion. On authorized meal creation or editing, save material portion assumptions and limitations in aiComment. Update or clear outdated comments when an answer changes their premise; do not leave contradicted assumptions. Omit aiComment when there is nothing useful to add, and send an empty string to remove an existing comment. A comment is not evidence and never substitutes for nutrition items or question resolutions.
 - Respect explicit user scope such as "everything in the picture". Do not silently reinterpret it as one item or repeat an already answered selection question. If counts or portions remain uncertain, ask only about those unresolved details and explain the uncertainty.
 - Before changing an existing meal, retrieve its current record unless the complete current record is already in context.
 - For an explicit weight-only correction to one saved item with a known mass, use edit_meal.portionGrams. Preserve its saved nutrition density without repeating research unless the user also requests new research.

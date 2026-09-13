@@ -19,6 +19,7 @@ type MealRow = {
   captured_at: number;
   status: MealStatus;
   note: string;
+  ai_comment: string | null;
   photos_json: string;
   analysis_json: string | null;
   error: string | null;
@@ -123,6 +124,7 @@ async function fromRow(row: MealRow, connection = database): Promise<Meal> {
     capturedAt: row.captured_at,
     status: row.status==='complete' && open.length?'needs_input':row.status,
     note: row.note,
+    aiComment: row.ai_comment ?? undefined,
     photos: normalizeMealPhotos(row.id, row.captured_at, parsedPhotos),
     analysis,
     error: row.error ?? undefined,
@@ -140,6 +142,7 @@ export async function initializeMeals(): Promise<void> {
       captured_at INTEGER NOT NULL,
       status TEXT NOT NULL,
       note TEXT NOT NULL,
+      ai_comment TEXT,
       photos_json TEXT NOT NULL,
       analysis_json TEXT,
       error TEXT,
@@ -159,6 +162,10 @@ export async function initializeMeals(): Promise<void> {
     CREATE INDEX IF NOT EXISTS meals_captured_at ON meals(captured_at DESC);
   `);
   const columns = await database.getAllAsync<{ name: string }>('PRAGMA table_info(meals)');
+  // Additive migration: existing records retain their user note and have no AI comment.
+  if (!columns.some((column) => column.name === 'ai_comment')) {
+    await database.execAsync('ALTER TABLE meals ADD COLUMN ai_comment TEXT;');
+  }
   if (!columns.some((column) => column.name === 'revision')) {
     await database.execAsync('ALTER TABLE meals ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;');
   }
@@ -218,14 +225,15 @@ export async function saveMealRecord(meal: Meal): Promise<void> {
   await transaction(async connection => {
   await connection.runAsync(
     `INSERT INTO meals (
-       id, revision, captured_at, status, note, photos_json, analysis_json, error,
+       id, revision, captured_at, status, note, ai_comment, photos_json, analysis_json, error,
        clarification_at, attempts, next_attempt_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
      ON CONFLICT(id) DO UPDATE SET
        revision = meals.revision + 1,
        captured_at = excluded.captured_at,
        status = excluded.status,
        note = excluded.note,
+       ai_comment = excluded.ai_comment,
        photos_json = excluded.photos_json,
        analysis_json = excluded.analysis_json,
        error = excluded.error,
@@ -237,6 +245,7 @@ export async function saveMealRecord(meal: Meal): Promise<void> {
     meal.capturedAt,
     meal.status,
     meal.note,
+    meal.aiComment ?? null,
     JSON.stringify(meal.photos),
     meal.analysis ? JSON.stringify(meal.analysis) : null,
     meal.error ?? null,
@@ -264,12 +273,13 @@ export async function writeMealIfRevision(connection: typeof database, input: Me
   const result = await connection.runAsync(
     `UPDATE meals SET
        revision = revision + 1,
-       captured_at = ?, status = ?, note = ?, photos_json = ?, analysis_json = ?, error = ?,
+       captured_at = ?, status = ?, note = ?, ai_comment = ?, photos_json = ?, analysis_json = ?, error = ?,
        clarification_at = ?, attempts = 0, next_attempt_at = NULL
      WHERE id = ? AND revision = ?`,
     input.capturedAt,
     input.status,
     input.note,
+    input.aiComment ?? null,
     JSON.stringify(input.photos),
     input.analysis ? JSON.stringify(input.analysis) : null,
     input.error ?? null,

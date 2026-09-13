@@ -6,7 +6,7 @@ CalDone turns captured food into a nutrition record and lets the user inspect or
 
 **Meal**:
 A dated record of food, its photos and notes, and the resulting editable nutrition estimate.
-The capture note belongs to the user. Agent edits preserve it verbatim; explanations and assumptions belong in the conversation or ingredient details.
+The capture note belongs to the user. Agent edits preserve it verbatim. The separate AI comment holds a concise assistant-authored explanation, such as an estimated oil quantity or a limitation of the photo. It can exist before a nutrition estimate, is visible in the meal card, and is included in backups and action snapshots. Omitting a comment in an edit preserves it; an empty comment removes it. Corrections should update or clear assumptions they invalidate; a comment never replaces nutrition items or question answers.
 _Avoid_: Check, entry, food log
 
 **Meal History**:
@@ -41,4 +41,4 @@ One accepted user input and the resulting sequence of provider requests and tool
 Visible activity follows the running operation across chat, meal detail and history. A submitted form stops accepting duplicate input once its answer is persisted, while unresolved questions remain durable until the agent resolves them.
 
 **Meal Edit**:
-An atomic change to nutrition and relevant question states, with a matching Undo snapshot and a replay receipt. A repeated tool call cannot apply the same edit twice.
+An atomic change to meal details, nutrition, or relevant question states, with a matching Undo snapshot and a replay receipt. An edit can update or clear only the AI comment, including before a nutrition estimate exists. A repeated tool call cannot apply the same edit twice.

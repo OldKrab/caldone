@@ -4,6 +4,8 @@ import { parseMealWebImage } from './mealWebImage.ts';
 export type MealEdit = {
   capturedAt?: number;
   note?: string;
+  /** Omit to preserve the comment; an empty string removes it. */
+  aiComment?: string;
   title?: string;
   mealType?: MealType;
   items?: MealItem[];
@@ -77,6 +79,7 @@ export function applyMealEdit(meal: Meal, edit: MealEdit): Meal {
     ...meal,
     capturedAt: edit.capturedAt ?? meal.capturedAt,
     note: edit.note === undefined ? meal.note : edit.note.trim(),
+    aiComment: edit.aiComment === undefined ? meal.aiComment : edit.aiComment.trim() || undefined,
     photos,
     analysis,
     ...(edit.items ? { status: 'complete' as const, error: undefined } : {}),

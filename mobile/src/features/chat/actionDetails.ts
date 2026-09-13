@@ -28,6 +28,7 @@ export function actionDetails(action: ChatAction, language: 'en' | 'ru'): Action
         : undefined,
       [ru ? 'Время' : 'Time']: new Date(meal.capturedAt).toLocaleString(ru ? 'ru-RU' : 'en-GB'),
       [ru ? 'Заметка' : 'Note']: meal.note || undefined,
+      [ru ? 'Комментарий ИИ' : 'AI comment']: meal.aiComment || undefined,
       [ru ? 'Фото' : 'Photos']: String(meal.photos.length),
       [ru ? 'Калории' : 'Calories']: a ? `${a.totals.calories} kcal` : undefined,
       [ru ? 'Белки' : 'Protein']: a ? `${a.totals.protein} g` : undefined,
