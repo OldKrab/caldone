@@ -36,7 +36,7 @@ export function HomeScreen(props: {
   const meals = [...props.meals].sort((a, b) => b.capturedAt - a.capturedAt);
   const isWorking = (meal: Meal) => props.activities.has(meal.id) || Boolean(props.answeringMealIds?.has(meal.id))
     || meal.status === 'queued' || meal.status === 'analyzing';
-  const attention = meals.filter(meal => !isWorking(meal) && (meal.status === 'needs_input' || meal.status === 'failed'));
+  const attention = meals.filter(meal => !isWorking(meal) && (meal.status === 'failed' || !meal.analysis || mealQuestionChoicesFor(meal).length > 0));
   const rest = meals.filter(meal => !attention.includes(meal));
   const progress = props.goals.calories ? Math.min(1, totals.calories / props.goals.calories) : 0;
   const unit = props.units.energy === 'kj' ? t('kilojoules') : t('kcal');
@@ -124,57 +124,60 @@ export function HomeScreen(props: {
             </View>
             {attention.length > 0 && (
               <View style={styles.attentionGroup}>
-                {attention.map((meal) => (
-                  <View
-                    key={meal.id}
-                    style={[styles.attention, meal.status === 'failed' && styles.failed]}
-                  >
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => props.onOpen(meal)}
-                      onLongPress={() => props.onMealLongPress(meal)}
-                      style={styles.attentionBody}
+                {attention.map((meal) => {
+                  const question = mealQuestionChoicesFor(meal)[0]?.question;
+                  return (
+                    <View
+                      key={meal.id}
+                      style={[styles.attention, meal.status === 'failed' && styles.failed]}
                     >
-                      <Ionicons
-                        name={
-                          meal.status === 'failed'
-                            ? 'alert-circle-outline'
-                            : 'chatbubble-ellipses-outline'
-                        }
-                        size={22}
-                        color={meal.status === 'failed' ? color.error : color.pending}
-                      />
-                      <View style={styles.rowCopy}>
-                        <Text style={styles.attentionTitle}>
-                          {meal.status === 'failed'
-                            ? ru
-                              ? 'Нужна повторная попытка'
-                              : 'Let’s try this meal again'
-                            : ru
-                              ? 'Вопрос о еде'
-                              : 'A question about your meal'}
-                        </Text>
-                        <Text numberOfLines={2} style={styles.attentionText}>
-                          {mealQuestionChoicesFor(meal)[0]?.question ??
-                            meal.analysis?.title ??
-                            t('meal')}
-                        </Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={18} color={color.pending} />
-                    </Pressable>
-                    {meal.status === 'failed' && (
                       <Pressable
                         accessibilityRole="button"
-                        onPress={() => props.onRetry(meal)}
-                        style={styles.retry}
+                        onPress={() => props.onOpen(meal)}
+                        onLongPress={() => props.onMealLongPress(meal)}
+                        style={styles.attentionBody}
                       >
-                        <Text style={styles.retryText}>
-                          {ru ? 'Повторить анализ' : 'Retry analysis'}
-                        </Text>
+                        <Ionicons
+                          name={
+                            meal.status === 'failed'
+                              ? 'alert-circle-outline'
+                              : question ? 'chatbubble-ellipses-outline' : 'document-text-outline'
+                          }
+                          size={22}
+                          color={meal.status === 'failed' ? color.error : color.pending}
+                        />
+                        <View style={styles.rowCopy}>
+                          <Text style={styles.attentionTitle}>
+                            {meal.status === 'failed'
+                              ? ru
+                                ? 'Нужна повторная попытка'
+                                : 'Let’s try this meal again'
+                              : question
+                                ? ru ? 'Вопрос о еде' : 'A question about your meal'
+                                : ru ? 'Пока без оценки' : 'No estimate yet'}
+                          </Text>
+                          <Text numberOfLines={2} style={styles.attentionText}>
+                            {question ??
+                              meal.analysis?.title ??
+                              t('meal')}
+                          </Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={18} color={color.pending} />
                       </Pressable>
-                    )}
-                  </View>
-                ))}
+                      {meal.status === 'failed' && (
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => props.onRetry(meal)}
+                          style={styles.retry}
+                        >
+                          <Text style={styles.retryText}>
+                            {ru ? 'Повторить анализ' : 'Retry analysis'}
+                          </Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  );
+                })}
               </View>
             )}
             <View style={styles.sectionHeading}>

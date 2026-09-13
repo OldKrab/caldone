@@ -129,3 +129,15 @@ test('meal footer exposes conversation and addition as matching buttons with dis
   buttons[1].props.onPress();
   assert.deepEqual(opened, ['conversation', 'addition']);
 });
+
+test('the journal distinguishes a missing estimate from an actual open question', () => {
+  const render = screen('HomeScreen');
+  const input = {activities:new Map(),goals:{},units:props.units,day:1,canGoNext:false,onOpen() {}};
+  const noEstimate = {...meal,analysis:undefined,questions:[]};
+  const texts = (record:any) => nodes(render({...input,meals:[record]}),'Text').map(node=>node.props.children);
+  assert.ok(texts(noEstimate).includes('No estimate yet'));
+  assert.ok(!texts(noEstimate).includes('A question about your meal'));
+  assert.ok(texts(meal).includes('A question about your meal'));
+  assert.ok(texts({...noEstimate,status:'failed'}).includes('Let’s try this meal again'));
+  assert.ok(!texts({...meal,analysis:{...meal.analysis,clarification:undefined},questions:[]}).includes('A question about your meal'));
+});
