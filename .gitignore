@@ -5,8 +5,12 @@
 # Release and diagnostic binaries belong in GitHub Releases, not Git history
 *.apk
 *-diagnostics.json
-web-preview/images/*.webp.json
 
 # Editor and operating-system noise
 .DS_Store
 *.log
+
+# Generated local builds and test evidence; curate public images in docs/images.
+/artifacts/
+**/android/build/
+**/android/.gradle/

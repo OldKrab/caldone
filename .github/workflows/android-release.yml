@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 45
     defaults:
       run:
-        working-directory: prototypes/pi-mobile-spike
+        working-directory: mobile
 
     steps:
       - name: Check out source
@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: prototypes/pi-mobile-spike/package-lock.json
+          cache-dependency-path: mobile/package-lock.json
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -48,11 +48,34 @@ jobs:
         shell: bash
         run: |
           npm run check
-          shopt -s globstar
-          node --test src/**/*.test.ts
+          npm test
+
+      - name: Check release identity and authored notes
+        id: release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const version = require('./package.json').version;
+          const app = require('./app.json').expo;
+          if (!/^\d+\.\d+\.\d+$/.test(version) || process.env.GITHUB_REF_NAME !== `v${version}`
+              || app.version !== version || require('./package-lock.json').version !== version) {
+            throw new Error('Release tag, package, lockfile, and Expo versions must agree');
+          }
+          const path = `docs/releases/${version}.md`;
+          const notes = fs.readFileSync(`../${path}`, 'utf8');
+          const title = /^# ([^\n]+)\n\n\S/.exec(notes)?.[1];
+          if (!title || title.length > 100 || /^v?\d+\.\d+\.\d+$/.test(title)) {
+            throw new Error('Release notes need a short, benefit-led heading and an opening summary');
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `title=${title}\nnotes=${path}\n`);
+          NODE
 
       - name: Generate native Android project
         run: npx expo prebuild --platform android --no-install
+
+      - name: Test Android update validation
+        run: ./android/gradlew -p android :caldone-updates:testDebugUnitTest --console=plain
 
       - name: Restore release signing key
         env:
@@ -118,7 +141,7 @@ jobs:
             exit 1
           fi
 
-          echo "path=prototypes/pi-mobile-spike/$artifact" >> "$GITHUB_OUTPUT"
+          echo "path=mobile/$artifact" >> "$GITHUB_OUTPUT"
           echo "name=$artifact" >> "$GITHUB_OUTPUT"
 
       - name: Upload workflow artifact
@@ -133,4 +156,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.artifact.outputs.path }}
-          generate_release_notes: true
+          name: ${{ steps.release.outputs.title }}
+          body_path: ${{ steps.release.outputs.notes }}
