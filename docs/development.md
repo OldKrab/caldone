@@ -45,7 +45,7 @@ Review the captured images before sharing. Include relevant open menus and dialo
 
 [Android release CI](../.github/workflows/android-release.yml) uses Node.js 22 and Java 21, validates TypeScript and tests, generates the native Android project, and builds a signed arm64 APK. Version tags (`v*`) publish GitHub releases; manual runs upload workflow artifacts. The workflow verifies the application ID, signing certificate, and APK architecture.
 
-Set the release version once in `mobile/app.json` (`expo.version`) and increase its Android `versionCode`. Settings, diagnostics, and APK naming read that config. The private npm package has no separate release version. Release signing secrets belong in GitHub Actions, never in the repository.
+Keep `mobile/package.json`, its lockfile, and `mobile/app.json` versions aligned when preparing a release; increase Android `versionCode`. Settings and diagnostics read the Expo config; release CI also validates the package and lockfile versions. Release signing secrets belong in GitHub Actions, never in the repository.
 
 ### Release writing
 
@@ -63,7 +63,7 @@ Update discovery uses the public `OldKrab/caldone` release list without credenti
 
 `caldone-updates` owns private temporary APK storage and Android installer sessions. Every candidate needs the GitHub SHA-256 digest; the native verifier also checks the package ID, pinned release signer, strictly increasing installed `versionCode`, minimum Android SDK, and device ABI. Android performs final package validation. Differently signed development installs cannot use this updater. Incomplete downloads restart only on explicit retry; downloaded APKs and installer state survive process interruption. A lost system confirmation requires a fresh explicit attempt.
 
-**Existing signing limitation:** the CI-pinned certificate (`fac61745…1033b9c`) matches the public React Native template debug keystore. Its private key is public, so the signer cannot prove exclusive CalDone publisher identity. The updater retains it for compatibility with installed releases and restricts downloads to the official GitHub repository with digest verification. Migrating to a private release key needs a separate compatibility decision; do not describe the current key as a secret production identity.
+**Existing signing limitation:** the CI-pinned certificate (`fac61745…1033b9c`) matches the [public React Native template debug keystore](https://github.com/react-native-community/template/blob/main/template/android/app/debug.keystore), verified during #51. Its private key is public, so the signer cannot prove exclusive CalDone publisher identity. The updater retains it for compatibility with installed releases and restricts downloads to the official GitHub repository with digest verification. Migrating to a private release key needs a separate compatibility decision; do not describe the current key as a secret production identity.
 
 Automatic notices appear once per release on an idle Today screen. Installer handoff waits for capture, drafts, analysis, chat, and data transfer to finish. Android installation-source permission is requested in context and system installation confirmation is always required. Updating the existing application ID preserves its local data and connections; the old application-ID migration remains separate.
 

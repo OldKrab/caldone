@@ -3,14 +3,14 @@
     "name": "CalDone",
     "slug": "caldone",
     "scheme": "caldone",
-    "version": "1.2.14",
+    "version": "1.2.15",
     "backgroundColor": "#F5F8F6",
     "orientation": "portrait",
     "icon": "./assets/caldone-fork-icon.png",
     "userInterfaceStyle": "light",
     "android": {
       "package": "dev.caldone.app",
-      "versionCode": 28,
+      "versionCode": 29,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#176B4D",

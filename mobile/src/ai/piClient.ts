@@ -1,4 +1,5 @@
 import { trackedSearchFetch, withHostedSearch } from './hostedSearch';
+import { withCodexImageDetail } from './codexImageDetail';
 import { agentRequestStream } from './agentRequestStream';
 import { requestDiagnostics } from './requestDiagnostics';
 import { restoreChatMealPhotos } from './chatMealPhotos';
@@ -244,14 +245,16 @@ async function modelRequestOptions(model: Model<string>) {
   return { ...toolOptions, ...(reasoning ? { reasoning } : {}) };
 }
 
-function diagnosticRequestOptions(model: Model<string>, scope: {mealId?: string; threadId?: string}, options: ModelsSimpleStreamOptions): ModelsSimpleStreamOptions {
+function providerRequestOptions(model: Model<string>, scope: {mealId?: string; threadId?: string}, options: ModelsSimpleStreamOptions): ModelsSimpleStreamOptions {
   const trace = requestDiagnostics({provider: model.provider, model: model.id, api: model.api, ...scope}, appendDiagnosticEvent);
   return {
     ...options,
     onPayload: async (payload, activeModel) => {
       const transformed = await options.onPayload?.(payload, activeModel) ?? payload;
-      await trace.onPayload(transformed);
-      return transformed;
+      const prepared = model.api === 'openai-codex-responses' ? withCodexImageDetail(transformed) : transformed;
+      // Diagnostics hash the final provider payload, including image-detail policy.
+      await trace.onPayload(prepared);
+      return prepared;
     },
     fetch: trace.wrapFetch(options.fetch ?? expoFetch as typeof globalThis.fetch),
   };
@@ -353,7 +356,7 @@ export async function createChatAgent(input: {
     transport: 'sse',
     convertToLlm: convertChatMessages,
     onPayload: toolOptions.onPayload,
-    streamFn: (activeModel, context, options) => agentRequestStream(activeModel, signal => models.streamSimple(activeModel, context, diagnosticRequestOptions(activeModel, {threadId: input.sessionId}, {
+    streamFn: (activeModel, context, options) => agentRequestStream(activeModel, signal => models.streamSimple(activeModel, context, providerRequestOptions(activeModel, {threadId: input.sessionId}, {
       ...options,
       signal,
       fetch: search?.fetch ?? baseFetch,
@@ -436,7 +439,7 @@ export async function sendTextPrompt(
         },
       ],
     },
-    diagnosticRequestOptions(model, {}, {
+    providerRequestOptions(model, {}, {
       ...requestOptions,
       fetch: expoFetch as typeof globalThis.fetch,
       transport: 'sse',
