@@ -23,6 +23,7 @@ async function askWithReceipt(receipt:any){
 test('a follow-up request restores a previously viewed meal photo after chat history was sanitized',async()=>{
   const payload=await askWithReceipt(photoReceipt);
   assert.deepEqual(imageBlocks(payload).map(x=>x.image_url),['data:image/jpeg;base64,'+photo]);
+  assert.deepEqual(imageBlocks(payload).map(x=>x.detail),['high']);
   assert.deepEqual(photoReceipt.content,[{type:'text',text:'[Meal photo was shown to the assistant.]'}], 'request hydration must not put image bytes into saved history');
 });
 
@@ -50,4 +51,25 @@ test('missing files and deleted meals produce an honest notice without aborting 
 test('a fresh tool result keeps its image without adding a second copy',async()=>{
   const payload=await askWithReceipt({...photoReceipt,content:[originalPhoto]});
   assert.equal(imageBlocks(payload).length,1);
+  assert.equal(imageBlocks(payload)[0].detail,'high');
+});
+
+test('attached Codex photos use high image detail independently of search and reasoning settings',async()=>{
+  try {
+    await client.selectThinkingLevel('openai-codex',undefined,'high');
+    for(const searchEnabled of [false,true]) {
+      await client.setWebSearchEnabled('openai-codex',searchEnabled);
+      const agent=await createChatAgent({systemPrompt:'Describe the photo',messages:[],tools:[],sessionId:'attached-photo-test'});
+      await agent.prompt('What is in this photograph?',[{type:'image',data:photo,mimeType:'image/jpeg'}]);
+      assert.equal(agent.state.errorMessage,undefined);
+      const payload=fixture.requests.at(-1);
+      assert.deepEqual(imageBlocks(payload),[{type:'input_image',detail:'high',image_url:'data:image/jpeg;base64,'+photo}]);
+      assert.equal(payload.reasoning.effort,'high');
+      assert.equal(payload.tools?.some((tool:any)=>tool.type==='web_search')??false,searchEnabled);
+      assert.equal(payload.model,'fixture-vision','the dynamically discovered model remains selected');
+    }
+  } finally {
+    await client.setWebSearchEnabled('openai-codex',false);
+    await client.selectThinkingLevel('openai-codex',undefined);
+  }
 });

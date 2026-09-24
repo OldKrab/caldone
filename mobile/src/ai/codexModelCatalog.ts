@@ -3,9 +3,10 @@ import { OPENAI_CODEX_MODELS } from '@earendil-works/pi-ai/providers/openai-code
 import { fetch as expoFetch } from 'expo/fetch';
 
 // Codex gates catalog entries by protocol compatibility, not the CalDone version.
-// Verified against codex-cli 0.154.0 and its /codex/models endpoint. Revisit this
+// Verified against codex-cli 0.156.1 and its /codex/models endpoint; 0.154.0
+// omits GPT-6 Sol/Luna even for accounts that can use them. Revisit this
 // when adopting new Codex protocol capabilities; never use a fabricated future version.
-const CATALOG_URL = 'https://chatgpt.com/backend-api/codex/models?client_version=0.154.0';
+const CATALOG_URL = 'https://chatgpt.com/backend-api/codex/models?client_version=0.156.1';
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 type RemoteModel = {

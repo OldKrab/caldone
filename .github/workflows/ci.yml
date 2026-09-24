@@ -32,5 +32,4 @@ jobs:
       - run: npm ci
       - run: npm run check
       - name: Run all tests, including nested feature tests
-        run: |
-          npm test
+        run: npm test
